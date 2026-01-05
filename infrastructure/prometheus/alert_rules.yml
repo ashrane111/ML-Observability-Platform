@@ -1,0 +1,218 @@
+# =============================================================================
+# Prometheus Alert Rules - ML Observability Platform
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # Model Drift Alerts
+  # ===========================================================================
+  - name: model_drift_alerts
+    rules:
+      # Prediction drift warning
+      - alert: PredictionDriftWarning
+        expr: ml_prediction_drift_psi > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Prediction drift detected for {{ $labels.model_name }}"
+          description: "PSI score {{ $value | printf \"%.3f\" }} exceeds warning threshold (0.2) for model {{ $labels.model_name }}"
+          runbook_url: "https://github.com/yourusername/ml-observability-platform/docs/runbooks/drift.md"
+
+      # Prediction drift critical
+      - alert: PredictionDriftCritical
+        expr: ml_prediction_drift_psi > 0.3
+        for: 2m
+        labels:
+          severity: critical
+          category: drift
+        annotations:
+          summary: "Critical prediction drift for {{ $labels.model_name }}"
+          description: "PSI score {{ $value | printf \"%.3f\" }} exceeds critical threshold (0.3). Model retraining recommended."
+          runbook_url: "https://github.com/yourusername/ml-observability-platform/docs/runbooks/drift.md"
+
+      # Feature drift warning
+      - alert: FeatureDriftWarning
+        expr: ml_feature_drift_count > 3
+        for: 5m
+        labels:
+          severity: warning
+          category: drift
+        annotations:
+          summary: "Multiple features drifting for {{ $labels.model_name }}"
+          description: "{{ $value }} features show significant drift for model {{ $labels.model_name }}"
+
+      # Feature drift critical  
+      - alert: FeatureDriftCritical
+        expr: ml_feature_drift_count > 5
+        for: 2m
+        labels:
+          severity: critical
+          category: drift
+        annotations:
+          summary: "Critical feature drift for {{ $labels.model_name }}"
+          description: "{{ $value }} features show significant drift. Immediate investigation required."
+
+  # ===========================================================================
+  # Model Performance Alerts
+  # ===========================================================================
+  - name: model_performance_alerts
+    rules:
+      # Accuracy degradation
+      - alert: ModelAccuracyDegradation
+        expr: (ml_model_accuracy_baseline - ml_model_accuracy_current) / ml_model_accuracy_baseline > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Model accuracy degradation for {{ $labels.model_name }}"
+          description: "Accuracy dropped by more than 10% from baseline for model {{ $labels.model_name }}"
+
+      # F1 score drop
+      - alert: ModelF1ScoreDrop
+        expr: ml_model_f1_score < 0.7
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Low F1 score for {{ $labels.model_name }}"
+          description: "F1 score {{ $value | printf \"%.3f\" }} is below acceptable threshold (0.7)"
+
+      # Regression RMSE increase
+      - alert: RegressionRMSEHigh
+        expr: ml_model_rmse > ml_model_rmse_baseline * 1.5
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High RMSE for {{ $labels.model_name }}"
+          description: "RMSE {{ $value | printf \"%.3f\" }} exceeds 1.5x baseline for model {{ $labels.model_name }}"
+
+  # ===========================================================================
+  # Data Quality Alerts
+  # ===========================================================================
+  - name: data_quality_alerts
+    rules:
+      # High missing value rate
+      - alert: HighMissingValueRate
+        expr: ml_data_quality_missing_rate > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: data_quality
+        annotations:
+          summary: "High missing value rate detected"
+          description: "Missing value rate {{ $value | printf \"%.2f%%\" }} exceeds 5% threshold"
+
+      # Outlier rate high
+      - alert: HighOutlierRate
+        expr: ml_data_quality_outlier_rate > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: data_quality
+        annotations:
+          summary: "High outlier rate detected"
+          description: "Outlier rate {{ $value | printf \"%.2f%%\" }} exceeds 10% threshold"
+
+      # Schema violation
+      - alert: SchemaViolation
+        expr: ml_data_quality_schema_violations > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: data_quality
+        annotations:
+          summary: "Schema violation detected"
+          description: "{{ $value }} schema violations detected in incoming data"
+
+      # Data quality score low
+      - alert: LowDataQualityScore
+        expr: ml_data_quality_score < 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: data_quality
+        annotations:
+          summary: "Low data quality score"
+          description: "Overall data quality score {{ $value | printf \"%.2f\" }} is below threshold (0.8)"
+
+  # ===========================================================================
+  # System Health Alerts
+  # ===========================================================================
+  - name: system_health_alerts
+    rules:
+      # High prediction latency
+      - alert: HighPredictionLatency
+        expr: histogram_quantile(0.99, rate(ml_prediction_latency_seconds_bucket[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "High prediction latency"
+          description: "P99 prediction latency {{ $value | printf \"%.3f\"}}s exceeds 200ms threshold"
+
+      # API error rate high
+      - alert: HighAPIErrorRate
+        expr: rate(ml_api_requests_total{status=~"5.."}[5m]) / rate(ml_api_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate {{ $value | printf \"%.2f%%\" }} exceeds 5%"
+
+      # Service down
+      - alert: APIServiceDown
+        expr: up{job="mlobs-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "API service is down"
+          description: "The ML Observability API service is not responding"
+
+      # Low throughput (might indicate issues)
+      - alert: LowPredictionThroughput
+        expr: rate(ml_predictions_total[5m]) < 0.1
+        for: 30m
+        labels:
+          severity: info
+          category: system
+        annotations:
+          summary: "Low prediction throughput"
+          description: "Prediction rate has been below 0.1/s for 30 minutes"
+
+  # ===========================================================================
+  # Explainability Alerts
+  # ===========================================================================
+  - name: explainability_alerts
+    rules:
+      # Feature importance shift
+      - alert: FeatureImportanceShift
+        expr: ml_feature_importance_drift > 0.3
+        for: 30m
+        labels:
+          severity: warning
+          category: explainability
+        annotations:
+          summary: "Feature importance shift detected"
+          description: "Feature importance has shifted significantly for {{ $labels.feature_name }} in model {{ $labels.model_name }}"
+
+      # SHAP computation timeout
+      - alert: SHAPComputationSlow
+        expr: histogram_quantile(0.95, rate(ml_shap_computation_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          category: explainability
+        annotations:
+          summary: "SHAP computation slow"
+          description: "P95 SHAP computation time {{ $value | printf \"%.2f\"}}s exceeds 5 seconds"

@@ -1,0 +1,147 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Data files (keep structure, ignore large files)
+data/raw/*
+data/processed/*
+data/reference/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/reference/.gitkeep
+
+# Model artifacts
+models/*
+!models/.gitkeep
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Prometheus data
+prometheus_data/
+
+# Grafana data
+grafana_data/
+
+# PostgreSQL data
+postgres_data/
+
+# Redis data
+redis_data/
+
+# Minio data
+minio_data/
+
+# Prefect
+.prefect/
+
+# Secrets (never commit!)
+*.pem
+*.key
+secrets.yaml
+**/secrets/*.yaml
+!**/secrets/*.yaml.example
+
+# Local overrides
+docker-compose.override.yml
+.env.local

@@ -1,0 +1,327 @@
+# =============================================================================
+# ML Observability Platform - Docker Compose
+# =============================================================================
+# All services for local development
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Application Services
+  # ===========================================================================
+  
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: mlobs-api
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql://mlobs:mlobs_secret_password@postgres:5432/mlobs
+      - REDIS_URL=redis://redis:6379
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=mlobs-api
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+    volumes:
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+    container_name: mlobs-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+      - STREAMLIT_SERVER_HEADLESS=true
+    volumes:
+      - ./dashboard:/app/dashboard
+    depends_on:
+      - api
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Orchestration (Prefect)
+  # ===========================================================================
+  
+  prefect:
+    image: prefecthq/prefect:2-python3.11
+    container_name: mlobs-prefect
+    ports:
+      - "4200:4200"
+    environment:
+      - PREFECT_SERVER_API_HOST=0.0.0.0
+      - PREFECT_SERVER_API_PORT=4200
+      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://mlobs:mlobs_secret_password@postgres:5432/prefect
+    command: prefect server start
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  prefect-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: mlobs-prefect-worker
+    environment:
+      - PREFECT_API_URL=http://prefect:4200/api
+      - DATABASE_URL=postgresql://mlobs:mlobs_secret_password@postgres:5432/mlobs
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    command: prefect worker start --pool default-agent-pool
+    volumes:
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./data:/app/data
+    depends_on:
+      - prefect
+      - api
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # ML Infrastructure
+  # ===========================================================================
+  
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: mlobs-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://mlobs:mlobs_secret_password@postgres:5432/mlflow
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://mlflow-artifacts
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+    command: >
+      mlflow server 
+      --backend-store-uri postgresql://mlobs:mlobs_secret_password@postgres:5432/mlflow
+      --default-artifact-root s3://mlflow-artifacts
+      --host 0.0.0.0
+      --port 5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Observability Stack
+  # ===========================================================================
+  
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: mlobs-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infrastructure/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: mlobs-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: mlobs-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infrastructure/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: mlobs-jaeger
+    ports:
+      - "16686:16686"  # UI
+      - "14268:14268"  # HTTP collector
+      - "6831:6831/udp"  # Thrift compact
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: mlobs-otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+    volumes:
+      - ./infrastructure/otel-collector/otel-collector-config.yml:/etc/otelcol-contrib/config.yaml
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - jaeger
+      - prometheus
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Data Stores
+  # ===========================================================================
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: mlobs-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=mlobs
+      - POSTGRES_PASSWORD=mlobs_secret_password
+      - POSTGRES_DB=mlobs
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlobs -d mlobs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mlobs-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: mlobs-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # Console
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - mlobs-network
+    restart: unless-stopped
+
+  # MinIO bucket creation (runs once)
+  minio-setup:
+    image: minio/mc:latest
+    container_name: mlobs-minio-setup
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/mlflow-artifacts --ignore-existing;
+      mc mb myminio/data --ignore-existing;
+      exit 0;
+      "
+    networks:
+      - mlobs-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  mlobs-network:
+    driver: bridge
+    name: mlobs-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    name: mlobs-postgres-data
+  redis_data:
+    name: mlobs-redis-data
+  minio_data:
+    name: mlobs-minio-data
+  prometheus_data:
+    name: mlobs-prometheus-data
+  grafana_data:
+    name: mlobs-grafana-data

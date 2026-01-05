@@ -1,0 +1,57 @@
+# =============================================================================
+# Grafana Datasources Provisioning
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  # Prometheus - Main metrics datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: ">=2.40.0"
+
+  # Jaeger - Tracing datasource
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+        filterBySpanID: true
+
+  # AlertManager - For viewing alerts
+  - name: AlertManager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+
+  # PostgreSQL - Direct database access (optional)
+  - name: PostgreSQL
+    type: postgres
+    url: postgres:5432
+    user: mlobs
+    secureJsonData:
+      password: mlobs_secret_password
+    jsonData:
+      database: mlobs
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 14400
+    editable: false
