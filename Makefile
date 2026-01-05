@@ -79,12 +79,12 @@ help:
 # Setup Commands
 # =============================================================================
 install:
-	@echo "$(BLUE)Installing production dependencies...$(NC)"
-	pip install -e .
+	@echo "$(BLUE)Installing production dependencies with uv...$(NC)"
+	uv pip install -e .
 
 install-dev:
-	@echo "$(BLUE)Installing development dependencies...$(NC)"
-	pip install -e ".[dev,notebooks]"
+	@echo "$(BLUE)Installing development dependencies with uv...$(NC)"
+	uv pip install -e ".[dev,notebooks]"
 	pre-commit install
 
 setup: env install-dev build

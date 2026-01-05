@@ -15,6 +15,9 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Configuration
+PYTHON_VERSION="3.10"
+
 # Print with color
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -42,12 +45,13 @@ echo ""
 # Check for required tools
 print_info "Checking required tools..."
 
-# Check Python
-if command -v python3 &> /dev/null; then
-    PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
-    print_success "Python found: $PYTHON_VERSION"
+# Check uv
+if command -v uv &> /dev/null; then
+    UV_VERSION=$(uv --version 2>&1 | cut -d' ' -f2)
+    print_success "uv found: $UV_VERSION"
 else
-    print_error "Python 3 is not installed. Please install Python 3.10+"
+    print_error "uv is not installed. Please install uv first:"
+    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
 
@@ -77,28 +81,23 @@ fi
 
 echo ""
 
-# Create virtual environment
-print_info "Creating Python virtual environment..."
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-    print_success "Virtual environment created"
+# Create virtual environment with uv
+print_info "Creating Python $PYTHON_VERSION virtual environment with uv..."
+if [ ! -d ".venv" ]; then
+    uv venv --python $PYTHON_VERSION .venv
+    print_success "Virtual environment created with Python $PYTHON_VERSION"
 else
     print_warning "Virtual environment already exists"
 fi
 
 # Activate virtual environment
 print_info "Activating virtual environment..."
-source venv/bin/activate
+source .venv/bin/activate
 print_success "Virtual environment activated"
 
-# Upgrade pip
-print_info "Upgrading pip..."
-pip install --upgrade pip > /dev/null 2>&1
-print_success "pip upgraded"
-
-# Install dependencies
-print_info "Installing Python dependencies (this may take a few minutes)..."
-pip install -e ".[dev,notebooks]" > /dev/null 2>&1
+# Install dependencies with uv
+print_info "Installing Python dependencies with uv (this may take a few minutes)..."
+uv pip install -e ".[dev,notebooks]"
 print_success "Dependencies installed"
 
 # Install pre-commit hooks
@@ -137,7 +136,7 @@ echo "  2. Start all services with Docker Compose:"
 echo "     ${YELLOW}make up${NC}"
 echo ""
 echo "  3. Or run locally without Docker:"
-echo "     ${YELLOW}source venv/bin/activate${NC}"
+echo "     ${YELLOW}source .venv/bin/activate${NC}"
 echo "     ${YELLOW}make api${NC}        # In one terminal"
 echo "     ${YELLOW}make dashboard${NC}  # In another terminal"
 echo ""

@@ -78,8 +78,9 @@ A production-grade **ML Monitoring and Observability Platform** that provides co
 
 ### Prerequisites
 
+- **uv** (recommended) - Fast Python package manager: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **Docker** & **Docker Compose** (v2.0+)
-- **Python 3.10+** (for local development)
+- **Python 3.10** (uv will install this automatically if needed)
 - **Git**
 
 ### 1. Clone the Repository
@@ -147,9 +148,9 @@ make demo
 ### Local Development Setup
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Create virtual environment with uv (Python 3.10)
+uv venv --python 3.10 .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 make install-dev
