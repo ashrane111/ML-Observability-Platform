@@ -10,7 +10,7 @@ A production-grade **ML Monitoring and Observability Platform** that provides co
 ## 🏗️ Architecture
 
 <p align="center">
-  <img src="assets/images/Project_architecture.png" alt="Architecture Overview" width="80%"/>
+  <img src="assets/images/Project_architecture.png" alt="Architecture Overview" width="40%"/>
 </p>
 
 ---
