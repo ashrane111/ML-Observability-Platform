@@ -463,16 +463,18 @@ class DriftInjector:
             if not np.issubdtype(df[feature].dtype, np.number):
                 continue
 
-            original_mean = df.loc[:start_idx, feature].mean()
-            original_std = df.loc[:start_idx, feature].std()
+            # Get stats from the pre-drift portion
+            pre_drift_data = df.loc[:start_idx, feature]
+            original_mean = pre_drift_data.mean()
+            original_std = pre_drift_data.std()
+
+            # Skip if no variance or invalid stats
+            if original_std == 0 or np.isnan(original_std) or np.isnan(original_mean):
+                continue
 
             # Shift the distribution
-            new_mean = original_mean * (1 + config.magnitude)
-            new_std = original_std * (1 + config.magnitude * 0.5)
-
-            # Transform to new distribution
-            standardized = (df.loc[start_idx:, feature] - original_mean) / original_std
-            df.loc[start_idx:, feature] = standardized * new_std + new_mean
+            shift = original_std * config.magnitude * 2
+            df.loc[start_idx:, feature] = df.loc[start_idx:, feature] + shift
 
         logger.debug(f"Covariate drift injected into {len(features)} features")
         return df

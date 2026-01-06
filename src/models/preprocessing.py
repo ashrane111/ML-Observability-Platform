@@ -213,9 +213,13 @@ class FeaturePreprocessor:
                 )
 
         # Boolean features - convert to int
+        # Boolean features - convert to int first, then impute
         if self.boolean_features:
+            from sklearn.preprocessing import FunctionTransformer
+
             boolean_pipeline = Pipeline(
                 steps=[
+                    ("to_int", FunctionTransformer(lambda x: x.astype(int))),
                     ("imputer", SimpleImputer(strategy="most_frequent")),
                 ]
             )
@@ -244,20 +248,21 @@ class FeaturePreprocessor:
         try:
             return list(self.preprocessor.get_feature_names_out())
         except AttributeError:
-            # Fallback for older sklearn versions
+            # Fallback for older sklearn versions - build names manually
             feature_names = []
 
-            # Numerical features keep their names
-            feature_names.extend(self.numerical_features)
+            for name, transformer, columns in self.preprocessor.transformers_:
+                if name == "remainder":
+                    continue
+                if hasattr(transformer, "get_feature_names_out"):
+                    try:
+                        names = list(transformer.get_feature_names_out(columns))
+                        feature_names.extend(names)
+                    except Exception:
+                        feature_names.extend(columns)
+                else:
+                    feature_names.extend(columns)
 
-            # Categorical features get expanded with one-hot encoding
-            if self.categorical_strategy == "onehot":
-                for col in self.categorical_features:
-                    feature_names.append(col)  # Simplified - actual names would include values
-            else:
-                feature_names.extend(self.categorical_features)
-
-            feature_names.extend(self.boolean_features)
             return feature_names
 
     def get_feature_info(self) -> dict:
