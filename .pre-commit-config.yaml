@@ -25,7 +25,7 @@ repos:
     rev: 24.1.1
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3.10
         args: [--line-length=100]
 
   # Import sorting with isort
@@ -83,7 +83,7 @@ repos:
 
 # Configuration for specific hooks
 default_language_version:
-  python: python3.11
+  python: python3.10
 
 # Files to exclude from all hooks
 exclude: |
