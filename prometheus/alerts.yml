@@ -1,0 +1,102 @@
+# =============================================================================
+# Prometheus Alert Rules
+# ML Observability Platform
+# =============================================================================
+
+groups:
+  # ---------------------------------------------------------------------------
+  # ML Model Alerts
+  # ---------------------------------------------------------------------------
+  - name: ml_model_alerts
+    rules:
+      # Data Drift Alerts
+      - alert: DataDriftDetected
+        expr: mlobs_dataset_drift_detected == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data drift detected for {{ $labels.model_name }}"
+          description: "Data drift has been detected for model {{ $labels.model_name }} on dataset {{ $labels.dataset_name }}."
+
+      - alert: HighDriftShare
+        expr: mlobs_drift_share > 0.3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High drift share for {{ $labels.model_name }}"
+          description: "{{ $value | humanizePercentage }} of features are drifting for model {{ $labels.model_name }}."
+
+      # Prediction Latency Alerts
+      - alert: HighPredictionLatency
+        expr: histogram_quantile(0.99, rate(mlobs_prediction_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High prediction latency for {{ $labels.model_name }}"
+          description: "P99 prediction latency is {{ $value | humanizeDuration }} for model {{ $labels.model_name }}."
+
+      - alert: VeryHighPredictionLatency
+        expr: histogram_quantile(0.99, rate(mlobs_prediction_latency_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Very high prediction latency for {{ $labels.model_name }}"
+          description: "P99 prediction latency is {{ $value | humanizeDuration }} for model {{ $labels.model_name }}."
+
+      # Model Availability Alerts
+      - alert: ModelNotLoaded
+        expr: mlobs_model_loaded == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Model {{ $labels.model_name }} is not loaded"
+          description: "Model {{ $labels.model_name }} v{{ $labels.model_version }} is not loaded and cannot serve predictions."
+
+      # Data Quality Alerts
+      - alert: HighMissingValues
+        expr: mlobs_missing_values_share > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High missing values for {{ $labels.model_name }}"
+          description: "{{ $value | humanizePercentage }} of values are missing in dataset {{ $labels.dataset_name }}."
+
+  # ---------------------------------------------------------------------------
+  # API Health Alerts
+  # ---------------------------------------------------------------------------
+  - name: api_health_alerts
+    rules:
+      - alert: APIHighErrorRate
+        expr: |
+          sum(rate(mlobs_predictions_total{status="error"}[5m]))
+          / sum(rate(mlobs_predictions_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in ML API"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: APIDown
+        expr: up{job="mlobs-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML Observability API is down"
+          description: "The ML Observability API has been unreachable for more than 1 minute."
+
+      - alert: LowPredictionThroughput
+        expr: sum(rate(mlobs_predictions_total[5m])) < 0.1
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low prediction throughput"
+          description: "Prediction throughput is very low ({{ $value }} req/s). This may indicate issues or simply low traffic."

@@ -1,0 +1,48 @@
+# =============================================================================
+# Prometheus Configuration
+# ML Observability Platform
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'ml-observability-platform'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Scrape configurations
+scrape_configs:
+  # -------------------------------------------------------------------------
+  # Prometheus self-monitoring
+  # -------------------------------------------------------------------------
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # -------------------------------------------------------------------------
+  # ML Observability API
+  # -------------------------------------------------------------------------
+  - job_name: 'mlobs-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: /monitoring/metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # -------------------------------------------------------------------------
+  # Additional scrape configs can be added here
+  # -------------------------------------------------------------------------
+  # Example: Node exporter for system metrics
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
