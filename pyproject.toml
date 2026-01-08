@@ -211,3 +211,7 @@ exclude = [
     "venv",
     ".venv",
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+skips = ["B311"]
