@@ -146,3 +146,4 @@ secrets.yaml
 # Local overrides
 docker-compose.override.yml
 .env.local
+uv.lock
