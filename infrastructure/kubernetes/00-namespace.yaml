@@ -1,0 +1,126 @@
+# ML Observability Platform - Kubernetes Namespace and Common Resources
+# ========================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+    app.kubernetes.io/component: infrastructure
+
+---
+# ConfigMap for shared configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-observability-config
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+data:
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+  MODEL_DIR: "/app/models"
+  DATA_DIR: "/app/data"
+  # Tracing configuration
+  OTEL_SERVICE_NAME: "ml-observability-platform"
+  OTEL_EXPORTER_TYPE: "otlp"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger-collector.ml-observability.svc.cluster.local:4317"
+  OTEL_TRACING_ENABLED: "true"
+  OTEL_SAMPLE_RATE: "1.0"
+  # Prometheus metrics
+  METRICS_PORT: "8000"
+  METRICS_PATH: "/metrics"
+
+---
+# Secret for sensitive configuration (example - replace with real values)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ml-observability-secrets
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+type: Opaque
+stringData:
+  # Add any secrets here
+  API_KEY: "your-api-key-here"
+  DATABASE_URL: "postgresql://user:password@host:5432/db"
+
+---
+# PersistentVolumeClaim for model storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-storage
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard  # Adjust for your cluster
+
+---
+# PersistentVolumeClaim for data storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-storage
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+# ServiceAccount for the application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ml-observability-sa
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+
+---
+# Role for application permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ml-observability-role
+  namespace: ml-observability
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ml-observability-rolebinding
+  namespace: ml-observability
+subjects:
+  - kind: ServiceAccount
+    name: ml-observability-sa
+    namespace: ml-observability
+roleRef:
+  kind: Role
+  name: ml-observability-role
+  apiGroup: rbac.authorization.k8s.io

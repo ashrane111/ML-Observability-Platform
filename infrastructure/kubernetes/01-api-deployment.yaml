@@ -1,0 +1,221 @@
+# ML Observability Platform - API Deployment
+# ============================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-api
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ml-api
+        app.kubernetes.io/name: ml-observability-platform
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: ml-observability-sa
+      
+      # Init container to wait for dependencies
+      initContainers:
+        - name: wait-for-jaeger
+          image: busybox:1.35
+          command: ['sh', '-c', 'until nc -z jaeger-collector.ml-observability.svc.cluster.local 4317; do echo waiting for jaeger; sleep 2; done']
+      
+      containers:
+        - name: ml-api
+          image: ml-observability-platform:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          
+          envFrom:
+            - configMapRef:
+                name: ml-observability-config
+          
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/models
+              readOnly: true
+            - name: data-storage
+              mountPath: /app/data
+              readOnly: true
+          
+          # Liveness probe - is the container alive?
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Readiness probe - is the container ready to receive traffic?
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          
+          # Startup probe - for slow-starting containers
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30  # 5s * 30 = 150s max startup time
+          
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: model-storage
+        - name: data-storage
+          persistentVolumeClaim:
+            claimName: data-storage
+      
+      # Pod scheduling preferences
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: ml-api
+                topologyKey: kubernetes.io/hostname
+      
+      # Tolerate some node issues
+      tolerations:
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+
+---
+# Service for the API
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-api
+  namespace: ml-observability
+  labels:
+    app.kubernetes.io/name: ml-observability-platform
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: ml-api
+
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-api-hpa
+  namespace: ml-observability
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ml-api-pdb
+  namespace: ml-observability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ml-api

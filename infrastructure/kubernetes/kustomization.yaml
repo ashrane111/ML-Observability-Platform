@@ -1,0 +1,48 @@
+# Kustomization file for ML Observability Platform
+# ================================================
+# Use: kubectl apply -k infrastructure/kubernetes/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: ml-observability-platform
+
+namespace: ml-observability
+
+# Resources to deploy
+resources:
+  - 00-namespace.yaml
+  - 01-api-deployment.yaml
+  - 02-monitoring.yaml
+  - 03-tracing.yaml
+  - 04-ingress.yaml
+
+# Common labels for all resources
+commonLabels:
+  app.kubernetes.io/name: ml-observability-platform
+  app.kubernetes.io/managed-by: kustomize
+
+# Image customization
+images:
+  - name: ml-observability-platform
+    newName: ml-observability-platform
+    newTag: latest
+
+# ConfigMap generator (optional, for additional config)
+configMapGenerator:
+  - name: app-version
+    literals:
+      - version=1.0.0
+      - commit=unknown
+
+# Patches for environment-specific changes
+# Uncomment and modify for your environment
+# patches:
+#   - patch: |-
+#       - op: replace
+#         path: /spec/replicas
+#         value: 3
+#     target:
+#       kind: Deployment
+#       name: ml-api

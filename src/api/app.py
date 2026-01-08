@@ -27,9 +27,21 @@ from src.models.fraud_detector import FraudDetector
 from src.models.price_predictor import PricePredictor
 from src.monitoring.drift_detector import DriftDetector
 
+# NEW: Import tracing modules
+from src.tracing import init_tracing, TracingConfig, shutdown_tracing
+from src.tracing.middleware import add_tracing_to_app
+
+# NEW: Import explainability modules
+from src.explainability import SHAPExplainer, ExplanationType
+from src.api.routes import explainability
+from src.api.routes.explainability import set_dependencies
+
 # Configuration
 MODEL_DIR = Path("models")
 DATA_DIR = Path("data")
+
+# NEW: Global registry for explainers
+explainer_registry = {}
 
 
 def load_models() -> dict[str, Any]:
@@ -140,6 +152,64 @@ def setup_drift_detectors(reference_data: dict[str, pd.DataFrame]) -> dict[str, 
     return detectors
 
 
+# NEW: Setup SHAP explainers for loaded models
+def setup_explainers(
+    models: dict[str, Any],
+    reference_data: dict[str, pd.DataFrame]
+) -> dict[str, SHAPExplainer]:
+    """Setup SHAP explainers for each model."""
+    explainers = {}
+    
+    target_columns = {
+        "fraud": "is_fraud",
+        "price": "price",
+        "churn": "churned",
+    }
+    
+    for model_type, model in models.items():
+        try:
+            # Get background data (reference data without target)
+            background = None
+            if model_type in reference_data:
+                ref_df = reference_data[model_type].copy()
+                target_col = target_columns.get(model_type)
+                if target_col and target_col in ref_df.columns:
+                    ref_df = ref_df.drop(columns=[target_col])
+                background = ref_df.head(100)  # Use first 100 samples
+            
+            # Get the underlying model for SHAP
+            underlying_model = model.model if hasattr(model, 'model') else model
+            
+            explainer = SHAPExplainer(
+                model=underlying_model,
+                background_data=background,
+                explanation_type=ExplanationType.TREE,
+                max_background_samples=100,
+            )
+            explainers[model_type] = explainer
+            logger.info(f"SHAP explainer configured for {model_type}")
+        except Exception as e:
+            logger.warning(f"Failed to setup SHAP explainer for {model_type}: {e}")
+    
+    return explainers
+
+
+# NEW: Simple explainer registry class for the API
+class ExplainerRegistry:
+    """Simple registry to hold explainers."""
+    def __init__(self):
+        self._explainers = {}
+    
+    def register(self, name: str, explainer: SHAPExplainer):
+        self._explainers[name] = explainer
+    
+    def get(self, name: str):
+        return self._explainers.get(name)
+    
+    def list_models(self):
+        return list(self._explainers.keys())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -149,6 +219,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     logger.info("Starting ML Observability Platform API...")
+
+    # NEW: Initialize OpenTelemetry tracing
+    try:
+        tracing_config = TracingConfig.from_env()
+        init_tracing(tracing_config)
+        logger.info("OpenTelemetry tracing initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize tracing: {e}")
 
     # Load models
     models = load_models()
@@ -164,6 +242,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     for model_type, detector in detectors.items():
         set_drift_detector(model_type, detector)
 
+    # NEW: Setup SHAP explainers
+    try:
+        explainers = setup_explainers(models, reference_data)
+        registry = ExplainerRegistry()
+        for model_type, explainer in explainers.items():
+            registry.register(model_type, explainer)
+        # Set dependencies for explainability routes
+        set_dependencies(registry, models)
+        logger.info(f"SHAP explainers configured for {len(explainers)} models")
+    except Exception as e:
+        logger.warning(f"Failed to setup SHAP explainers: {e}")
+
     logger.info(f"Loaded {len(models)} models, {len(detectors)} drift detectors")
     logger.info("API startup complete")
 
@@ -171,6 +261,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down ML Observability Platform API...")
+    
+    # NEW: Shutdown tracing
+    try:
+        shutdown_tracing()
+        logger.info("Tracing shutdown complete")
+    except Exception as e:
+        logger.warning(f"Error during tracing shutdown: {e}")
 
 
 # Create FastAPI application
@@ -185,6 +282,8 @@ app = FastAPI(
     - **Data Quality**: Check data quality metrics
     - **Alerts**: Manage monitoring alerts
     - **Metrics**: Prometheus-compatible metrics endpoint
+    - **Explainability**: SHAP-based feature importance and local explanations
+    - **Tracing**: Distributed tracing with OpenTelemetry and Jaeger
 
     ## Models
 
@@ -207,6 +306,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# NEW: Add tracing middleware
+try:
+    add_tracing_to_app(app)
+    logger.info("Tracing middleware added")
+except Exception as e:
+    logger.warning(f"Failed to add tracing middleware: {e}")
 
 
 # =============================================================================
@@ -259,6 +365,8 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(health.router)
 app.include_router(predictions.router)
 app.include_router(monitoring.router)
+# NEW: Include explainability router
+app.include_router(explainability.router)
 
 
 # =============================================================================
@@ -274,6 +382,7 @@ async def root() -> dict[str, str]:
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "explain": "/explain/models",  # NEW
     }
 
 
