@@ -15,11 +15,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from src.api.routes import health, monitoring, predictions
+# NEW: Import metrics module
+from src.api.routes import explainability, health, metrics, monitoring, predictions
+from src.api.routes.explainability import set_dependencies
 from src.api.routes.health import set_model_status
+from src.api.routes.metrics import set_drift_status, set_model_loaded  # noqa:F401
 from src.api.routes.monitoring import set_drift_detector
 from src.api.routes.predictions import set_model
 from src.api.schemas import ErrorResponse
+
+# NEW: Import explainability modules
+from src.explainability import ExplanationType, SHAPExplainer
 from src.models.churn_predictor import ChurnPredictor
 from src.models.fraud_detector import FraudDetector
 
@@ -28,13 +34,8 @@ from src.models.price_predictor import PricePredictor
 from src.monitoring.drift_detector import DriftDetector
 
 # NEW: Import tracing modules
-from src.tracing import init_tracing, TracingConfig, shutdown_tracing
+from src.tracing import TracingConfig, init_tracing, shutdown_tracing
 from src.tracing.middleware import add_tracing_to_app
-
-# NEW: Import explainability modules
-from src.explainability import SHAPExplainer, ExplanationType
-from src.api.routes import explainability
-from src.api.routes.explainability import set_dependencies
 
 # Configuration
 MODEL_DIR = Path("models")
@@ -154,18 +155,17 @@ def setup_drift_detectors(reference_data: dict[str, pd.DataFrame]) -> dict[str, 
 
 # NEW: Setup SHAP explainers for loaded models
 def setup_explainers(
-    models: dict[str, Any],
-    reference_data: dict[str, pd.DataFrame]
+    models: dict[str, Any], reference_data: dict[str, pd.DataFrame]
 ) -> dict[str, SHAPExplainer]:
     """Setup SHAP explainers for each model."""
     explainers = {}
-    
+
     target_columns = {
         "fraud": "is_fraud",
         "price": "price",
         "churn": "churned",
     }
-    
+
     for model_type, model in models.items():
         try:
             # Get background data (reference data without target)
@@ -176,10 +176,10 @@ def setup_explainers(
                 if target_col and target_col in ref_df.columns:
                     ref_df = ref_df.drop(columns=[target_col])
                 background = ref_df.head(100)  # Use first 100 samples
-            
+
             # Get the underlying model for SHAP
-            underlying_model = model.model if hasattr(model, 'model') else model
-            
+            underlying_model = model.model if hasattr(model, "model") else model
+
             explainer = SHAPExplainer(
                 model=underlying_model,
                 background_data=background,
@@ -190,22 +190,23 @@ def setup_explainers(
             logger.info(f"SHAP explainer configured for {model_type}")
         except Exception as e:
             logger.warning(f"Failed to setup SHAP explainer for {model_type}: {e}")
-    
+
     return explainers
 
 
 # NEW: Simple explainer registry class for the API
 class ExplainerRegistry:
     """Simple registry to hold explainers."""
+
     def __init__(self):
         self._explainers = {}
-    
+
     def register(self, name: str, explainer: SHAPExplainer):
         self._explainers[name] = explainer
-    
+
     def get(self, name: str):
         return self._explainers.get(name)
-    
+
     def list_models(self):
         return list(self._explainers.keys())
 
@@ -261,7 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down ML Observability Platform API...")
-    
+
     # NEW: Shutdown tracing
     try:
         shutdown_tracing()
@@ -332,10 +333,24 @@ async def add_process_time_header(request: Request, call_next: Any) -> Any:
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next: Any) -> Any:
-    """Log all requests."""
+    """Log all requests and record metrics."""
+    start_time = time.time()
     logger.debug(f"{request.method} {request.url.path}")
     response = await call_next(request)
+    duration = time.time() - start_time
     logger.debug(f"{request.method} {request.url.path} - {response.status_code}")
+
+    # Record metrics (skip /metrics endpoint to avoid recursion)
+    if request.url.path != "/metrics":
+        from src.api.routes.metrics import record_request
+
+        record_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code,
+            duration=duration,
+        )
+
     return response
 
 
@@ -367,6 +382,8 @@ app.include_router(predictions.router)
 app.include_router(monitoring.router)
 # NEW: Include explainability router
 app.include_router(explainability.router)
+# NEW: Include metrics router
+app.include_router(metrics.router)
 
 
 # =============================================================================

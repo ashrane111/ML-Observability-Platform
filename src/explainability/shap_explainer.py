@@ -6,7 +6,8 @@ Supports XGBoost, LightGBM, and scikit-learn models.
 
 import logging
 from enum import Enum
-from pathlib import Path
+
+# from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -62,6 +63,7 @@ class SHAPExplainer:
         # Lazy import to avoid issues if shap not installed
         try:
             import shap
+
             self._shap = shap
         except ImportError as e:
             raise ImportError(
@@ -85,12 +87,10 @@ class SHAPExplainer:
 
         logger.info(
             f"Initialized SHAP explainer with type={explanation_type.value}, "
-            f"background_samples={len(self._background_data) if self._background_data is not None else 0}"
+            f"background_samples={len(self._background_data) if self._background_data is not None else 0}"  # n noqa:E501
         )
 
-    def _prepare_background_data(
-        self, data: Optional[pd.DataFrame]
-    ) -> Optional[pd.DataFrame]:
+    def _prepare_background_data(self, data: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
         """Prepare and sample background data."""
         if data is None:
             return None
@@ -98,9 +98,7 @@ class SHAPExplainer:
         # Sample if too large
         if len(data) > self.max_background_samples:
             data = data.sample(n=self.max_background_samples, random_state=42)
-            logger.info(
-                f"Sampled background data to {self.max_background_samples} samples"
-            )
+            logger.info(f"Sampled background data to {self.max_background_samples} samples")
 
         # Auto-detect feature names
         if self.feature_names is None and hasattr(data, "columns"):
@@ -117,9 +115,7 @@ class SHAPExplainer:
             try:
                 return shap.TreeExplainer(self.model)
             except Exception as e:
-                logger.warning(
-                    f"TreeExplainer failed: {e}. Falling back to Explainer."
-                )
+                logger.warning(f"TreeExplainer failed: {e}. Falling back to Explainer.")
                 return shap.Explainer(self.model)
 
         elif self.explanation_type == ExplanationType.LINEAR:
@@ -198,14 +194,13 @@ class SHAPExplainer:
             prediction = self.model.predict(X_array)
 
         result = {
-            "shap_values": shap_values.tolist()
-            if isinstance(shap_values, np.ndarray)
-            else shap_values,
-            "feature_names": self.feature_names or [f"feature_{i}" for i in range(X_array.shape[1])],
+            "shap_values": (
+                shap_values.tolist() if isinstance(shap_values, np.ndarray) else shap_values
+            ),
+            "feature_names": self.feature_names
+            or [f"feature_{i}" for i in range(X_array.shape[1])],
             "feature_values": X_array.tolist(),
-            "prediction": prediction.tolist()
-            if isinstance(prediction, np.ndarray)
-            else prediction,
+            "prediction": prediction.tolist() if isinstance(prediction, np.ndarray) else prediction,
         }
 
         if include_base_value:
@@ -233,9 +228,7 @@ class SHAPExplainer:
         """
         if X is None:
             if self._background_data is None:
-                raise ValueError(
-                    "Either provide X or initialize with background_data"
-                )
+                raise ValueError("Either provide X or initialize with background_data")
             X = self._background_data
 
         X_array = self._ensure_numpy(X)
@@ -258,9 +251,7 @@ class SHAPExplainer:
             raise ValueError(f"Unknown method: {method}. Use mean_abs, mean, or max_abs")
 
         # Create feature importance dictionary
-        feature_names = self.feature_names or [
-            f"feature_{i}" for i in range(len(importance))
-        ]
+        feature_names = self.feature_names or [f"feature_{i}" for i in range(len(importance))]
 
         importance_dict = dict(zip(feature_names, importance.tolist()))
 
@@ -348,7 +339,9 @@ class SHAPExplainer:
         X_array = self._ensure_numpy(X)
 
         if sample_idx >= len(X_array):
-            raise ValueError(f"sample_idx {sample_idx} out of range for data of size {len(X_array)}")
+            raise ValueError(
+                f"sample_idx {sample_idx} out of range for data of size {len(X_array)}"
+            )
 
         # Get single sample
         X_single = X_array[[sample_idx]]
@@ -366,7 +359,11 @@ class SHAPExplainer:
 
         # Build report
         report = {
-            "prediction": explanation["prediction"][0] if isinstance(explanation["prediction"], list) else explanation["prediction"],
+            "prediction": (
+                explanation["prediction"][0]
+                if isinstance(explanation["prediction"], list)
+                else explanation["prediction"]
+            ),
             "base_value": explanation.get("base_value"),
             "total_shap_contribution": float(np.sum(shap_values)),
             "feature_details": [

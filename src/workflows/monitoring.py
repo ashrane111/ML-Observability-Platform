@@ -7,22 +7,23 @@ Provides:
 """
 
 import logging
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
+
+# from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from prefect import flow, get_run_logger
 from prefect.artifacts import create_markdown_artifact
 
 from .tasks import (
-    load_data,
-    validate_data,
     check_drift,
-    compare_distributions,
-    send_alert,
     check_thresholds,
-    load_model,
+    compare_distributions,
     evaluate_model,
+    load_data,
+    load_model,
+    send_alert,
+    validate_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,7 +229,8 @@ def drift_monitoring_flow(
 
             send_alert(
                 alert_type="drift_detected",
-                message=f"Data drift detected for {model_type}: {results['drift_share']:.1%} of features",
+                message=f"Data drift detected for {model_type}: \
+                    {results['drift_share']:.1%} of features",
                 severity=severity,
                 metadata={
                     "drift_share": results["drift_share"],
@@ -250,7 +252,8 @@ def drift_monitoring_flow(
 - **Features with Drift:** {len(results['features_with_drift'])}
 
 ## Affected Features
-{chr(10).join([f"- {f}" for f in results['features_with_drift'][:10]]) if results['features_with_drift'] else "None"}
+{chr(10).join([f"- {f}" for f in results['features_with_drift'][:10]]) \
+ if results['features_with_drift'] else "None"}
 
 **Checked:** {results['checked_at']}
 """,
@@ -332,10 +335,12 @@ def model_health_flow(
 
             if violations:
                 results["is_healthy"] = False
-                results["issues"].extend([
-                    f"{v['metric']}: {v['value']:.4f} (threshold: {v['threshold']})"
-                    for v in violations
-                ])
+                results["issues"].extend(
+                    [
+                        f"{v['metric']}: {v['value']:.4f} (threshold: {v['threshold']})"
+                        for v in violations
+                    ]
+                )
 
                 send_alert(
                     alert_type="performance_degradation",
@@ -352,6 +357,7 @@ def model_health_flow(
         try:
             sample = X_test.iloc[:5]
             from src.models.preprocessing import FeaturePreprocessor
+
             preprocessor = FeaturePreprocessor()
             sample_processed = preprocessor.fit_transform(sample)
             predictions = model.predict(sample_processed)
@@ -373,7 +379,9 @@ def model_health_flow(
 ## Metrics
 | Metric | Value |
 |--------|-------|
-""" + "\n".join([f"| {k} | {v:.4f} |" for k, v in results.get('metrics', {}).items()]) + f"""
+"""
+            + "\n".join([f"| {k} | {v:.4f} |" for k, v in results.get("metrics", {}).items()])
+            + f"""
 
 ## Issues
 {chr(10).join([f"- {i}" for i in results['issues']]) if results['issues'] else "None"}
@@ -505,10 +513,17 @@ def full_monitoring_flow(
 ## Model Status
 | Model | Data Quality | Drift | Health |
 |-------|--------------|-------|--------|
-""" + "\n".join([
-            f"| {m} | {'✅' if mr.get('data_quality', {}).get('quality_score', 0) >= 0.8 else '⚠️'} | {'🚨' if mr.get('drift', {}).get('drift_detected') else '✅'} | {'✅' if mr.get('health', {}).get('is_healthy') else '⚠️'} |"
-            for m, mr in results["models"].items()
-        ]) + f"""
+"""
+        + "\n".join(
+            [
+                f"| {m} | {'✅' if mr.get('data_quality', {}).get('quality_score', 0) \
+                           >= 0.8 else '⚠️'} | {'🚨' if mr.get('drift', {}).get('drift_detected')\
+                                                 else '✅'} | {'✅' if mr.get('health', {}).get('is_healthy') \
+                                                              else '⚠️'} |"
+                for m, mr in results["models"].items()
+            ]
+        )
+        + f"""
 
 ## Summary
 - **Models with Drift:** {', '.join(drift_detected) if drift_detected else 'None'}

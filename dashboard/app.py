@@ -3,16 +3,14 @@
 Run with: streamlit run dashboard/app.py
 """
 
-import json
 import os
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+
+# import sys
+# from datetime import datetime
+from typing import Any, Dict, List
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -33,7 +31,8 @@ st.set_page_config(
 )
 
 # Custom CSS
-st.markdown("""
+st.markdown(
+    """
 <style>
     .metric-card {
         background-color: #f0f2f6;
@@ -46,12 +45,15 @@ st.markdown("""
     .status-critical { color: #dc3545; }
     .big-font { font-size: 24px !important; font-weight: bold; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ============================================================================
 # API Helper Functions
 # ============================================================================
+
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_health() -> Dict[str, Any]:
@@ -59,8 +61,8 @@ def fetch_health() -> Dict[str, Any]:
     try:
         response = requests.get(f"{API_URL}/health", timeout=5)
         return response.json()
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    except Exception:
+        return {"status": "error", "error": "Cannot connect to API"}
 
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
@@ -69,8 +71,13 @@ def fetch_drift_status(model_name: str) -> Dict[str, Any]:
     try:
         response = requests.get(f"{API_URL}/monitoring/drift/status/{model_name}", timeout=10)
         return response.json()
-    except Exception as e:
-        return {"error": str(e), "drift_detected": False, "drift_share": 0, "drifted_features": []}
+    except Exception:
+        return {
+            "error": "Cannot fetch",
+            "drift_detected": False,
+            "drift_share": 0,
+            "drifted_features": [],
+        }
 
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
@@ -78,8 +85,15 @@ def fetch_alerts() -> List[Dict[str, Any]]:
     """Fetch active alerts."""
     try:
         response = requests.get(f"{API_URL}/monitoring/alerts", timeout=5)
-        return response.json()
-    except Exception as e:
+        data = response.json()
+        # Handle both list and dict responses
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and "alerts" in data:
+            return data["alerts"]
+        else:
+            return []
+    except Exception:
         return []
 
 
@@ -89,7 +103,7 @@ def fetch_alert_summary() -> Dict[str, Any]:
     try:
         response = requests.get(f"{API_URL}/monitoring/alerts/summary", timeout=5)
         return response.json()
-    except Exception as e:
+    except Exception:
         return {"total": 0, "by_severity": {}, "by_type": {}}
 
 
@@ -106,32 +120,31 @@ def make_prediction(model_name: str, features: Dict[str, Any]) -> Dict[str, Any]
 # Sidebar
 # ============================================================================
 
+
 def render_sidebar():
     """Render the sidebar navigation and filters."""
     st.sidebar.title("🔍 ML Observability")
     st.sidebar.markdown("---")
-    
+
     page = st.sidebar.radio(
         "Navigation",
         ["Dashboard", "Models", "Drift Detection", "Alerts", "Predictions", "Settings"],
     )
-    
+
     st.sidebar.markdown("---")
     selected_model = st.sidebar.selectbox("Select Model", ["fraud", "price", "churn"])
-    
+
     st.sidebar.markdown("---")
     time_range = st.sidebar.selectbox(
-        "Time Range",
-        ["Last 1 hour", "Last 6 hours", "Last 24 hours", "Last 7 days"],
-        index=2
+        "Time Range", ["Last 1 hour", "Last 6 hours", "Last 24 hours", "Last 7 days"], index=2
     )
-    
+
     if st.sidebar.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
-    
+
     auto_refresh = st.sidebar.checkbox("Auto-refresh", value=False)
-    
+
     return page, selected_model, time_range, auto_refresh
 
 
@@ -139,72 +152,83 @@ def render_sidebar():
 # Dashboard Page
 # ============================================================================
 
+
 def render_dashboard(selected_model: str):
     """Render the main dashboard page."""
     st.title("📊 ML Observability Dashboard")
-    
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     health = fetch_health()
-    
+
     with col1:
-        status = "✅ Healthy" if health.get("status") == "ok" else "❌ Error"
+        status = "✅ Healthy" if health.get("status") == "healthy" else "❌ Error"
         st.metric("API Status", status)
-    
+
     with col2:
         models_loaded = health.get("models_loaded", {})
-        loaded_count = sum(1 for v in models_loaded.values() if v)
+        if isinstance(models_loaded, dict):
+            loaded_count = sum(1 for v in models_loaded.values() if v)
+        else:
+            loaded_count = 0
         st.metric("Models Loaded", f"{loaded_count}/3")
-    
+
     with col3:
         alert_summary = fetch_alert_summary()
         st.metric("Active Alerts", alert_summary.get("total", 0))
-    
+
     with col4:
         drift_status = fetch_drift_status(selected_model)
         drift_detected = drift_status.get("drift_detected", False)
         st.metric(f"{selected_model.title()} Drift", "⚠️ Yes" if drift_detected else "✅ No")
-    
+
     st.markdown("---")
-    
+
     # Model Status Grid
     st.subheader("Model Status Overview")
     model_cols = st.columns(3)
-    
+
     for i, model in enumerate(["fraud", "price", "churn"]):
         with model_cols[i]:
             status = fetch_drift_status(model)
             drift = status.get("drift_detected", False)
             drift_share = status.get("drift_share", 0)
-            
+
             st.markdown(f"### {model.title()} Detector")
             st.write(f"**Drift:** {'🚨 Detected' if drift else '✅ None'}")
             st.write(f"**Drift Share:** {drift_share:.1%}")
             st.write(f"**Features Drifted:** {len(status.get('drifted_features', []))}")
-    
+
     st.markdown("---")
-    
+
     # Alerts
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("📢 Recent Alerts")
         alerts = fetch_alerts()
-        if alerts:
+        if alerts and isinstance(alerts, list) and len(alerts) > 0:
             for alert in alerts[:5]:
-                severity_icon = {"info": "🔵", "warning": "🟡", "critical": "🔴"}.get(alert.get("severity"), "⚪")
-                st.write(f"{severity_icon} **{alert.get('alert_type')}**: {alert.get('message', '')[:50]}...")
+                if isinstance(alert, dict):
+                    severity_icon = {"info": "🔵", "warning": "🟡", "critical": "🔴"}.get(
+                        alert.get("severity"), "⚪"
+                    )
+                    msg = alert.get("message", "No message")
+                    if isinstance(msg, str):
+                        msg = msg[:50]
+                    st.write(f"{severity_icon} **{alert.get('alert_type', 'Unknown')}**: {msg}...")
         else:
             st.info("No active alerts")
-    
+
     with col2:
         st.subheader("📈 Alert Distribution")
         alert_summary = fetch_alert_summary()
-        if alert_summary.get("by_severity"):
+        by_severity = alert_summary.get("by_severity", {})
+        if by_severity and isinstance(by_severity, dict) and len(by_severity) > 0:
             fig = px.pie(
-                values=list(alert_summary["by_severity"].values()),
-                names=list(alert_summary["by_severity"].keys()),
-                color_discrete_map={"info": "#17a2b8", "warning": "#ffc107", "critical": "#dc3545"}
+                values=list(by_severity.values()),
+                names=list(by_severity.keys()),
+                color_discrete_map={"info": "#17a2b8", "warning": "#ffc107", "critical": "#dc3545"},
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -215,41 +239,42 @@ def render_dashboard(selected_model: str):
 # Models Page
 # ============================================================================
 
+
 def render_models_page(selected_model: str):
     """Render the models detail page."""
     st.title(f"🤖 Model: {selected_model.title()}")
-    
+
     model_info = {
-        "fraud": {"type": "XGBoost Classifier", "target": "is_fraud", "features": 10},
-        "price": {"type": "LightGBM Regressor", "target": "price", "features": 12},
-        "churn": {"type": "Random Forest Classifier", "target": "churned", "features": 8},
+        "fraud": {"type": "XGBoost Classifier", "target": "is_fraud", "features": 27},
+        "price": {"type": "LightGBM Regressor", "target": "price", "features": 19},
+        "churn": {"type": "Random Forest Classifier", "target": "churned", "features": 31},
     }
-    
+
     info = model_info.get(selected_model, {})
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Model Information")
         st.write(f"**Type:** {info.get('type')}")
         st.write(f"**Target:** {info.get('target')}")
         st.write(f"**Features:** {info.get('features')}")
-    
+
     with col2:
         st.subheader("Actions")
         if st.button("🔄 Trigger Retraining"):
             st.info("Retraining flow triggered!")
         if st.button("📊 View Full Metrics"):
             st.info("Opening metrics...")
-    
+
     st.markdown("---")
     st.subheader("Performance Metrics")
-    
+
     metrics_data = {
         "fraud": {"Accuracy": 0.92, "Precision": 0.89, "Recall": 0.85, "F1": 0.87, "AUC": 0.94},
         "price": {"R²": 0.82, "RMSE": 32500, "MAE": 25000},
         "churn": {"Accuracy": 0.88, "Precision": 0.86, "Recall": 0.82, "F1": 0.84},
     }
-    
+
     metrics = metrics_data.get(selected_model, {})
     cols = st.columns(len(metrics))
     for i, (name, value) in enumerate(metrics.items()):
@@ -262,12 +287,13 @@ def render_models_page(selected_model: str):
 # Drift Detection Page
 # ============================================================================
 
+
 def render_drift_page(selected_model: str):
     """Render the drift detection page."""
     st.title("📉 Drift Detection")
-    
+
     drift_status = fetch_drift_status(selected_model)
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Drift Detected", "Yes" if drift_status.get("drift_detected") else "No")
@@ -275,24 +301,33 @@ def render_drift_page(selected_model: str):
         st.metric("Drift Share", f"{drift_status.get('drift_share', 0):.1%}")
     with col3:
         st.metric("Features Drifted", len(drift_status.get("drifted_features", [])))
-    
+
     st.markdown("---")
     st.subheader("Feature Drift Scores")
-    
+
     # Sample feature scores for visualization
     feature_scores = {
-        "amount": 0.15, "hour": 0.05, "day_of_week": 0.02,
-        "customer_age": 0.22, "account_age_days": 0.08,
-        "transaction_count_24h": 0.18, "avg_transaction_amount": 0.12,
+        "amount": 0.15,
+        "hour": 0.05,
+        "day_of_week": 0.02,
+        "customer_age": 0.22,
+        "account_age_days": 0.08,
+        "transaction_count_24h": 0.18,
+        "avg_transaction_amount": 0.12,
     }
-    
-    df_scores = pd.DataFrame({
-        "Feature": list(feature_scores.keys()),
-        "PSI Score": list(feature_scores.values())
-    }).sort_values("PSI Score", ascending=True)
-    
-    fig = px.bar(df_scores, x="PSI Score", y="Feature", orientation="h",
-                 color="PSI Score", color_continuous_scale=["green", "yellow", "red"])
+
+    df_scores = pd.DataFrame(
+        {"Feature": list(feature_scores.keys()), "PSI Score": list(feature_scores.values())}
+    ).sort_values("PSI Score", ascending=True)
+
+    fig = px.bar(
+        df_scores,
+        x="PSI Score",
+        y="Feature",
+        orientation="h",
+        color="PSI Score",
+        color_continuous_scale=["green", "yellow", "red"],
+    )
     fig.add_vline(x=0.1, line_dash="dash", line_color="orange")
     fig.add_vline(x=0.2, line_dash="dash", line_color="red")
     st.plotly_chart(fig, use_container_width=True)
@@ -302,12 +337,13 @@ def render_drift_page(selected_model: str):
 # Alerts Page
 # ============================================================================
 
+
 def render_alerts_page():
     """Render the alerts page."""
     st.title("🚨 Alert Management")
-    
+
     alert_summary = fetch_alert_summary()
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total", alert_summary.get("total", 0))
@@ -315,22 +351,28 @@ def render_alerts_page():
         st.metric("Critical", alert_summary.get("by_severity", {}).get("critical", 0))
     with col3:
         st.metric("Warning", alert_summary.get("by_severity", {}).get("warning", 0))
-    
+
     st.markdown("---")
     st.subheader("Active Alerts")
-    
+
     alerts = fetch_alerts()
-    if alerts:
+    if alerts and isinstance(alerts, list) and len(alerts) > 0:
         for alert in alerts[:20]:
-            icon = {"info": "🔵", "warning": "🟡", "critical": "🔴"}.get(alert.get("severity"), "⚪")
-            with st.expander(f"{icon} {alert.get('alert_type')} - {alert.get('created_at', '')[:19]}"):
-                st.write(f"**Message:** {alert.get('message')}")
-                st.write(f"**Severity:** {alert.get('severity')}")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.button("✅ Acknowledge", key=f"ack_{alert.get('id', id(alert))}")
-                with col2:
-                    st.button("🔇 Resolve", key=f"res_{alert.get('id', id(alert))}")
+            if isinstance(alert, dict):
+                icon = {"info": "🔵", "warning": "🟡", "critical": "🔴"}.get(
+                    alert.get("severity"), "⚪"
+                )
+                with st.expander(
+                    f"{icon} {alert.get('alert_type', 'Unknown')} - \
+                    {str(alert.get('created_at', ''))[:19]}"
+                ):
+                    st.write(f"**Message:** {alert.get('message', 'No message')}")
+                    st.write(f"**Severity:** {alert.get('severity', 'unknown')}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.button("✅ Acknowledge", key=f"ack_{id(alert)}")
+                    with col2:
+                        st.button("🔇 Resolve", key=f"res_{id(alert)}")
     else:
         st.info("No active alerts")
 
@@ -339,79 +381,180 @@ def render_alerts_page():
 # Predictions Page
 # ============================================================================
 
+
 def render_predictions_page(selected_model: str):
     """Render the predictions testing page."""
     st.title("🎯 Make Predictions")
-    
+
     if selected_model == "fraud":
         col1, col2 = st.columns(2)
         with col1:
             amount = st.number_input("Amount ($)", value=100.0)
             hour = st.slider("Hour", 0, 23, 14)
             customer_age = st.number_input("Customer Age", value=35)
+            transaction_type = st.selectbox(
+                "Transaction Type", ["purchase", "transfer", "payment", "withdrawal", "deposit"]
+            )
         with col2:
-            transaction_count = st.number_input("Transactions (24h)", value=3)
+            merchant_category = st.selectbox(
+                "Merchant Category",
+                [
+                    "retail",
+                    "grocery",
+                    "restaurant",
+                    "online_shopping",
+                    "travel",
+                    "entertainment",
+                    "gas_station",
+                    "healthcare",
+                    "utilities",
+                    "other",
+                ],
+            )
             distance = st.number_input("Distance from Home (km)", value=5.0)
-        
-        if st.button("🔍 Predict"):
-            result = make_prediction("fraud", {
-                "amount": amount, "hour": hour, "customer_age": customer_age,
-                "transaction_count_24h": transaction_count, "distance_from_home": distance
-            })
+            is_online = st.checkbox("Is Online Transaction")
+            is_foreign = st.checkbox("Is Foreign Transaction")
+
+        if st.button("🔍 Predict Fraud"):
+            features = {
+                "amount": amount,
+                "hour_of_day": hour,
+                "transaction_type": transaction_type,
+                "merchant_category": merchant_category,
+                "distance_from_home": distance,
+                "is_online": 1 if is_online else 0,
+                "is_foreign": 1 if is_foreign else 0,
+                "latitude": 40.7128,
+                "longitude": -74.0060,
+                "day_of_week": 3,
+                "avg_transaction_amount": 75.0,
+                "transaction_count_24h": 3,
+                "transaction_count_7d": 15,
+                "is_weekend": 0,
+            }
+
+            with st.spinner("Making prediction..."):
+                result = make_prediction("fraud", features)
+
             if "error" not in result:
-                pred = result.get("prediction", 0)
-                prob = result.get("probability", 0)
-                st.metric("Prediction", "🚨 FRAUD" if pred else "✅ OK")
-                st.metric("Probability", f"{prob:.1%}")
-    
+                col1, col2 = st.columns(2)
+                with col1:
+                    pred = result.get("is_fraud", False)
+                    st.metric("Prediction", "🚨 FRAUD" if pred else "✅ LEGITIMATE")
+                with col2:
+                    prob = result.get("fraud_probability", 0)
+                    st.metric("Fraud Probability", f"{prob:.1%}")
+            else:
+                st.error(f"Error: {result.get('error', result.get('detail', 'Unknown error'))}")
+
     elif selected_model == "price":
         col1, col2 = st.columns(2)
         with col1:
             sqft = st.number_input("Square Feet", value=1500)
             bedrooms = st.number_input("Bedrooms", value=3)
+            property_type = st.selectbox(
+                "Property Type", ["house", "apartment", "condo", "townhouse"]
+            )
         with col2:
             bathrooms = st.number_input("Bathrooms", value=2.0)
             year_built = st.number_input("Year Built", value=2000)
-        
-        if st.button("💰 Predict"):
-            result = make_prediction("price", {
-                "sqft": sqft, "bedrooms": bedrooms, "bathrooms": bathrooms, "year_built": year_built
-            })
+
+        if st.button("💰 Predict Price"):
+            features = {
+                "square_feet": sqft,
+                "bedrooms": bedrooms,
+                "bathrooms": bathrooms,
+                "year_built": year_built,
+                "property_type": property_type,
+                "latitude": 40.7128,
+                "longitude": -74.0060,
+                "neighborhood_score": 7.5,
+                "school_rating": 8.0,
+                "crime_rate": 2.5,
+                "has_garage": 1,
+                "has_pool": 0,
+                "has_garden": 1,
+                "renovated": 0,
+                "days_on_market": 30,
+                "num_price_changes": 1,
+            }
+
+            with st.spinner("Making prediction..."):
+                result = make_prediction("price", features)
+
             if "error" not in result:
-                st.metric("Predicted Price", f"${result.get('prediction', 0):,.0f}")
-    
+                st.metric("Predicted Price", f"${result.get('predicted_price', 0):,.0f}")
+            else:
+                st.error(f"Error: {result.get('error', result.get('detail', 'Unknown error'))}")
+
     elif selected_model == "churn":
         col1, col2 = st.columns(2)
         with col1:
             tenure = st.number_input("Tenure (months)", value=24)
             monthly_charges = st.number_input("Monthly Charges ($)", value=70.0)
+            age = st.number_input("Customer Age", value=35)
+            gender = st.selectbox("Gender", ["male", "female", "other"])
         with col2:
-            contract = st.selectbox("Contract", ["month-to-month", "one_year", "two_year"])
-            support_tickets = st.number_input("Support Tickets", value=2)
-        
-        if st.button("📊 Predict"):
-            result = make_prediction("churn", {
-                "tenure_months": tenure, "monthly_charges": monthly_charges,
-                "contract_type": contract, "num_support_tickets": support_tickets
-            })
+            contract = st.selectbox("Contract", ["month-to-month", "annual"])
+            location = st.selectbox(
+                "Location", ["midwest", "northeast", "southeast", "southwest", "west"]
+            )
+            subscription = st.selectbox(
+                "Subscription Plan", ["free", "basic", "premium", "enterprise"]
+            )
+            payment = st.selectbox(
+                "Payment Method", ["credit_card", "debit_card", "bank_transfer", "paypal"]
+            )
+
+        if st.button("📊 Predict Churn"):
+            features = {
+                "tenure_months": tenure,
+                "monthly_charges": monthly_charges,
+                "total_charges": tenure * monthly_charges,
+                "contract_type": contract,
+                "age": age,
+                "gender": gender,
+                "location": location,
+                "subscription_plan": subscription,
+                "payment_method": payment,
+                "login_frequency": 15,
+                "feature_usage_score": 65,
+                "last_activity_days": 5,
+                "support_tickets": 2,
+                "complaints": 0,
+                "referrals": 1,
+                "nps_score": 7,
+                "email_opt_in": 1,
+                "auto_renewal": 1,
+            }
+
+            with st.spinner("Making prediction..."):
+                result = make_prediction("churn", features)
+
             if "error" not in result:
-                pred = result.get("prediction", 0)
-                prob = result.get("probability", 0)
-                st.metric("Prediction", "⚠️ WILL CHURN" if pred else "✅ WILL STAY")
-                st.metric("Probability", f"{prob:.1%}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    pred = result.get("will_churn", False)
+                    st.metric("Prediction", "⚠️ WILL CHURN" if pred else "✅ WILL STAY")
+                with col2:
+                    prob = result.get("churn_probability", 0)
+                    st.metric("Churn Probability", f"{prob:.1%}")
+            else:
+                st.error(f"Error: {result.get('error', result.get('detail', 'Unknown error'))}")
 
 
 # ============================================================================
 # Settings Page
 # ============================================================================
 
+
 def render_settings_page():
     """Render the settings page."""
     st.title("⚙️ Settings")
-    
+
     st.subheader("API Configuration")
     st.text_input("API URL", value=API_URL)
-    
+
     st.subheader("Thresholds")
     col1, col2 = st.columns(2)
     with col1:
@@ -420,7 +563,7 @@ def render_settings_page():
     with col2:
         st.number_input("Min Accuracy", value=0.85)
         st.number_input("Max Latency (ms)", value=500)
-    
+
     if st.button("💾 Save"):
         st.success("Settings saved!")
 
@@ -429,9 +572,10 @@ def render_settings_page():
 # Main
 # ============================================================================
 
+
 def main():
     page, selected_model, time_range, auto_refresh = render_sidebar()
-    
+
     if page == "Dashboard":
         render_dashboard(selected_model)
     elif page == "Models":

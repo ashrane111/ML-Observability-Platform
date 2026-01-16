@@ -23,22 +23,26 @@ class ExplainRequest(BaseModel):
     features: Dict[str, Any] = Field(..., description="Input features for prediction")
     top_k: int = Field(default=10, ge=1, le=50, description="Number of top features to return")
 
-    model_config = {"json_schema_extra": {"example": {
-        "model_name": "fraud",
-        "features": {
-            "amount": 150.0,
-            "hour": 14,
-            "day_of_week": 2,
-            "is_weekend": 0,
-            "merchant_category": "retail",
-            "customer_age": 35,
-            "account_age_days": 730,
-            "transaction_count_24h": 3,
-            "avg_transaction_amount": 85.0,
-            "distance_from_home": 5.2,
-        },
-        "top_k": 10,
-    }}}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model_name": "fraud",
+                "features": {
+                    "amount": 150.0,
+                    "hour": 14,
+                    "day_of_week": 2,
+                    "is_weekend": 0,
+                    "merchant_category": "retail",
+                    "customer_age": 35,
+                    "account_age_days": 730,
+                    "transaction_count_24h": 3,
+                    "avg_transaction_amount": 85.0,
+                    "distance_from_home": 5.2,
+                },
+                "top_k": 10,
+            }
+        }
+    }
 
 
 class FeatureContribution(BaseModel):
@@ -65,8 +69,7 @@ class FeatureImportanceRequest(BaseModel):
 
     model_name: str = Field(..., description="Name of the model")
     method: str = Field(
-        default="mean_abs",
-        description="Aggregation method: mean_abs, mean, or max_abs"
+        default="mean_abs", description="Aggregation method: mean_abs, mean, or max_abs"
     )
     top_k: int = Field(default=20, ge=1, le=100, description="Number of top features")
 
@@ -125,14 +128,14 @@ def get_explainer(model_name: str):
     if _explainer_registry is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Explainability service not initialized"
+            detail="Explainability service not initialized",
         )
 
     explainer = _explainer_registry.get(model_name)
     if explainer is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No explainer available for model: {model_name}"
+            detail=f"No explainer available for model: {model_name}",
         )
     return explainer
 
@@ -165,22 +168,24 @@ async def explain_prediction(request: ExplainRequest) -> ExplanationResponse:
         contributions = explainer.get_feature_contributions(df, top_k=request.top_k)[0]
 
         # Build SHAP values dict
-        shap_values = dict(zip(
-            explanation["feature_names"],
-            explanation["shap_values"][0] if isinstance(explanation["shap_values"][0], list) else explanation["shap_values"]
-        ))
+        shap_values = dict(
+            zip(
+                explanation["feature_names"],
+                (
+                    explanation["shap_values"][0]
+                    if isinstance(explanation["shap_values"][0], list)
+                    else explanation["shap_values"]
+                ),
+            )
+        )
 
         return ExplanationResponse(
             model_name=request.model_name,
             prediction=contributions["prediction"],
             base_value=explanation.get("base_value"),
             shap_values=shap_values,
-            top_positive=[
-                FeatureContribution(**c) for c in contributions["positive_contributors"]
-            ],
-            top_negative=[
-                FeatureContribution(**c) for c in contributions["negative_contributors"]
-            ],
+            top_positive=[FeatureContribution(**c) for c in contributions["positive_contributors"]],
+            top_negative=[FeatureContribution(**c) for c in contributions["negative_contributors"]],
             total_contribution=sum(shap_values.values()),
         )
 
@@ -188,7 +193,7 @@ async def explain_prediction(request: ExplainRequest) -> ExplanationResponse:
         logger.error(f"Explanation failed for {request.model_name}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Explanation failed: {str(e)}"
+            detail=f"Explanation failed: {str(e)}",
         )
 
 
@@ -204,7 +209,7 @@ async def get_feature_importance(request: FeatureImportanceRequest) -> FeatureIm
         importance = explainer.get_feature_importance(method=request.method)
 
         # Get top k features
-        top_features = list(importance.keys())[:request.top_k]
+        top_features = list(importance.keys())[: request.top_k]
         filtered_importance = {k: v for k, v in importance.items() if k in top_features}
 
         return FeatureImportanceResponse(
@@ -218,7 +223,7 @@ async def get_feature_importance(request: FeatureImportanceRequest) -> FeatureIm
         logger.error(f"Feature importance failed for {request.model_name}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Feature importance calculation failed: {str(e)}"
+            detail=f"Feature importance calculation failed: {str(e)}",
         )
 
 
@@ -232,8 +237,7 @@ async def explain_batch(request: BatchExplainRequest) -> BatchExplainResponse:
 
     if len(request.samples) > 100:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Batch size limited to 100 samples"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Batch size limited to 100 samples"
         )
 
     explainer = get_explainer(request.model_name)
@@ -261,7 +265,7 @@ async def explain_batch(request: BatchExplainRequest) -> BatchExplainResponse:
         logger.error(f"Batch explanation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch explanation failed: {str(e)}"
+            detail=f"Batch explanation failed: {str(e)}",
         )
 
 
@@ -305,7 +309,7 @@ async def get_explanation_report(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No sample data provided and no reference data available"
+                detail="No sample data provided and no reference data available",
             )
 
         report = explainer.generate_explanation_report(df, sample_idx=0)
@@ -315,12 +319,11 @@ async def get_explanation_report(
 
     except json.JSONDecodeError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON in sample_data"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON in sample_data"
         )
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Report generation failed: {str(e)}"
+            detail=f"Report generation failed: {str(e)}",
         )

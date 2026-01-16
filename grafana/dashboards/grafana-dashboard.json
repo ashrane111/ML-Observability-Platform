@@ -1,0 +1,312 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "title": "ML Observability Platform",
+  "uid": "ml-observability-main",
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "🟢 Services Status",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "up{job=\"mlobs-api\"}",
+          "refId": "A",
+          "legendFormat": "API"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 2,
+      "title": "📊 Total Requests",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(http_requests_total)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 3,
+      "title": "⚡ Requests/sec",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps",
+          "decimals": 2
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 4,
+      "title": "💾 Memory Usage",
+      "type": "gauge",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "MB",
+          "min": 0,
+          "max": 1000,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500 },
+              { "color": "red", "value": 800 }
+            ]
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 5,
+      "title": "📈 Request Rate by Endpoint",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m])) by (endpoint)",
+          "refId": "A",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "pointSize": 5,
+            "showPoints": "auto"
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 6,
+      "title": "⏱️ Response Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le, endpoint))",
+          "refId": "A",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 7,
+      "title": "🔴 Errors by Endpoint",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status_code!=\"200\"}[1m])) by (endpoint, status_code)",
+          "refId": "A",
+          "legendFormat": "{{endpoint}} ({{status_code}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 8,
+      "title": "📊 Request Distribution",
+      "type": "piechart",
+      "gridPos": { "x": 12, "y": 12, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(http_requests_total) by (endpoint)",
+          "refId": "A",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "pie"
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 9,
+      "title": "🖥️ CPU Usage",
+      "type": "timeseries",
+      "gridPos": { "x": 18, "y": 12, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total[1m]) * 100",
+          "refId": "A",
+          "legendFormat": "CPU %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 10,
+      "title": "📋 Request Status Breakdown",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(http_requests_total) by (endpoint, method, status_code)",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": {
+              "endpoint": "Endpoint",
+              "method": "Method",
+              "status_code": "Status",
+              "Value": "Count"
+            }
+          }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 11,
+      "title": "📈 Memory Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "refId": "A",
+          "legendFormat": "Memory (MB)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "blue", "mode": "fixed" },
+          "unit": "MB",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "smooth"
+          }
+        }
+      },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    }
+  ],
+  "schemaVersion": 38
+}

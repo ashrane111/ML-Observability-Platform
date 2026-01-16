@@ -34,7 +34,7 @@ spec:
                 name: ml-api
                 port:
                   number: 8000
-    
+
     # Grafana
     - host: grafana.example.com  # Change to your domain
       http:
@@ -46,7 +46,7 @@ spec:
                 name: grafana
                 port:
                   number: 3000
-    
+
     # Jaeger UI
     - host: jaeger.example.com  # Change to your domain
       http:
@@ -58,7 +58,7 @@ spec:
                 name: jaeger-query
                 port:
                   number: 16686
-    
+
     # Prometheus (typically internal only)
     - host: prometheus.example.com  # Change to your domain
       http:

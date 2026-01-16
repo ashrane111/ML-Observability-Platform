@@ -8,12 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .tracer import (
-    add_span_attributes,
-    get_current_trace_id,
-    get_tracer,
-    trace_span,
-)
+from .tracer import add_span_attributes, get_current_trace_id, get_tracer, trace_span  # noqa:F401
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +60,9 @@ class TracingMiddleware(BaseHTTPMiddleware):
 
                 # Add response attributes
                 span.set_attribute("http.status_code", response.status_code)
-                span.set_attribute("http.response_content_type",
-                                 response.headers.get("content-type", "unknown"))
+                span.set_attribute(
+                    "http.response_content_type", response.headers.get("content-type", "unknown")
+                )
 
                 # Add trace ID to response headers
                 trace_id = get_current_trace_id()

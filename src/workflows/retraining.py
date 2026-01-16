@@ -7,25 +7,26 @@ Provides:
 """
 
 import logging
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
+
+# from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from prefect import flow, get_run_logger
 from prefect.artifacts import create_markdown_artifact
-from prefect.deployments import run_deployment
+from prefect.deployments import run_deployment  # noqa:F401
 
 from .tasks import (
-    load_data,
-    validate_data,
-    prepare_features,
-    train_model,
-    evaluate_model,
-    save_model,
-    load_model,
     check_drift,
-    send_alert,
     check_thresholds,
+    evaluate_model,
+    load_data,
+    load_model,
+    prepare_features,
+    save_model,
+    send_alert,
+    train_model,
+    validate_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,9 +119,8 @@ def retraining_flow(
 
         # Split data
         from sklearn.model_selection import train_test_split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         # Step 3: Train model
         run_logger.info("Training model...")
@@ -184,7 +184,9 @@ def retraining_flow(
 ## Model Metrics
 | Metric | Value |
 |--------|-------|
-""" + "\n".join([f"| {k} | {v:.4f} |" for k, v in metrics.items()]) + f"""
+"""
+            + "\n".join([f"| {k} | {v:.4f} |" for k, v in metrics.items()])
+            + f"""
 
 ## Model Path
 `{save_path}`
@@ -353,14 +355,8 @@ def scheduled_retraining_flow(
             }
 
     # Generate summary
-    success_count = sum(
-        1 for r in results["models"].values()
-        if r.get("status") == "success"
-    )
-    retrained_count = sum(
-        1 for r in results["models"].values()
-        if r.get("retrained", False)
-    )
+    success_count = sum(1 for r in results["models"].values() if r.get("status") == "success")
+    retrained_count = sum(1 for r in results["models"].values() if r.get("retrained", False))
 
     results["summary"] = {
         "total_models": len(models),
@@ -380,10 +376,14 @@ def scheduled_retraining_flow(
 ## Results
 | Model | Status | Drift Detected | Retrained |
 |-------|--------|----------------|-----------|
-""" + "\n".join([
-            f"| {m} | {r.get('status', 'unknown')} | {'Yes' if r.get('drift_detected') else 'No'} | {'Yes' if r.get('retrained') else 'No'} |"
-            for m, r in results["models"].items()
-        ]) + f"""
+"""
+        + "\n".join(
+            [
+                f"| {m} | {r.get('status', 'unknown')} | {'Yes' if r.get('drift_detected') else 'No'} | {'Yes' if r.get('retrained') else 'No'} |"  # noqa:E501
+                for m, r in results["models"].items()
+            ]
+        )
+        + f"""
 
 ## Summary
 - **Total Models:** {len(models)}

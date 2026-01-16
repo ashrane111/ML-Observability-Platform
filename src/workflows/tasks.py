@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 from prefect import task
-from prefect.artifacts import create_markdown_artifact, create_table_artifact
+from prefect.artifacts import create_markdown_artifact, create_table_artifact  # noqa:F401
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +104,7 @@ def validate_data(
     missing_pct = df.isnull().mean()
     high_missing = missing_pct[missing_pct > max_missing_pct]
     if not high_missing.empty:
-        results["issues"].append(
-            f"Columns with high missing %: {high_missing.to_dict()}"
-        )
+        results["issues"].append(f"Columns with high missing %: {high_missing.to_dict()}")
 
     # Check for duplicates
     dup_count = df.duplicated().sum()
@@ -116,7 +114,9 @@ def validate_data(
 
     results["missing_summary"] = missing_pct.to_dict()
 
-    logger.info(f"Validation complete: valid={results['is_valid']}, issues={len(results['issues'])}")
+    logger.info(
+        f"Validation complete: valid={results['is_valid']}, issues={len(results['issues'])}"
+    )
     return results
 
 
@@ -184,10 +184,10 @@ def train_model(
     """
     # Import models - adjust path based on your project structure
     try:
-        from src.models import FraudDetector, PricePredictor, ChurnPredictor
+        from src.models import ChurnPredictor, FraudDetector, PricePredictor
         from src.models.preprocessing import FeaturePreprocessor
     except ImportError:
-        from models import FraudDetector, PricePredictor, ChurnPredictor
+        from models import ChurnPredictor, FraudDetector, PricePredictor
         from models.preprocessing import FeaturePreprocessor
 
     logger.info(f"Training {model_type} model with {len(X_train)} samples")
@@ -259,7 +259,8 @@ def evaluate_model(
 
 | Metric | Value |
 |--------|-------|
-""" + "\n".join([f"| {k} | {v:.4f} |" for k, v in metrics.items()]),
+"""
+        + "\n".join([f"| {k} | {v:.4f} |" for k, v in metrics.items()]),
         description=f"Evaluation results for {model_name}",
     )
 
@@ -298,6 +299,7 @@ def save_model(
     # Save metadata if provided
     if metadata:
         import json
+
         meta_path = save_path / "training_metadata.json"
         with open(meta_path, "w") as f:
             json.dump(metadata, f, indent=2, default=str)
@@ -325,9 +327,9 @@ def load_model(
         Loaded model instance
     """
     try:
-        from src.models import FraudDetector, PricePredictor, ChurnPredictor
+        from src.models import ChurnPredictor, FraudDetector, PricePredictor
     except ImportError:
-        from models import FraudDetector, PricePredictor, ChurnPredictor
+        from models import ChurnPredictor, FraudDetector, PricePredictor
 
     model_classes = {
         "fraud": FraudDetector,
@@ -383,10 +385,10 @@ def check_drift(
     )
 
     # Set reference
-    detector.set_reference(reference_data)
+    detector.set_reference_data(reference_data)
 
     # Check drift
-    result = detector.detect(current_data)
+    result = detector.detect_drift(current_data)
 
     # Create artifact
     if result.get("drift_detected", False):
@@ -480,9 +482,9 @@ def send_alert(
         True if alert sent successfully
     """
     try:
-        from src.monitoring.alerts import AlertManager, Alert, AlertSeverity
+        from src.monitoring.alerts import Alert, AlertManager, AlertSeverity
     except ImportError:
-        from monitoring.alerts import AlertManager, Alert, AlertSeverity
+        from monitoring.alerts import Alert, AlertManager, AlertSeverity
 
     logger.info(f"Sending {severity} alert: {alert_type}")
 
@@ -535,22 +537,26 @@ def check_thresholds(
             threshold = thresholds[metric]
 
             if "min" in threshold and value < threshold["min"]:
-                violations.append({
-                    "metric": metric,
-                    "value": value,
-                    "threshold": threshold["min"],
-                    "type": "below_minimum",
-                    "model": model_name,
-                })
+                violations.append(
+                    {
+                        "metric": metric,
+                        "value": value,
+                        "threshold": threshold["min"],
+                        "type": "below_minimum",
+                        "model": model_name,
+                    }
+                )
 
             if "max" in threshold and value > threshold["max"]:
-                violations.append({
-                    "metric": metric,
-                    "value": value,
-                    "threshold": threshold["max"],
-                    "type": "above_maximum",
-                    "model": model_name,
-                })
+                violations.append(
+                    {
+                        "metric": metric,
+                        "value": value,
+                        "threshold": threshold["max"],
+                        "type": "above_maximum",
+                        "model": model_name,
+                    }
+                )
 
     if violations:
         logger.warning(f"Found {len(violations)} threshold violations for {model_name}")

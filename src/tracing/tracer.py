@@ -12,7 +12,7 @@ import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,9 @@ class TracingConfig:
         return cls(
             service_name=os.getenv("OTEL_SERVICE_NAME", "ml-observability-platform"),
             jaeger_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-            jaeger_http_endpoint=os.getenv("JAEGER_HTTP_ENDPOINT", "http://localhost:14268/api/traces"),
+            jaeger_http_endpoint=os.getenv(
+                "JAEGER_HTTP_ENDPOINT", "http://localhost:14268/api/traces"
+            ),
             exporter_type=os.getenv("OTEL_EXPORTER_TYPE", "otlp"),
             sample_rate=float(os.getenv("OTEL_SAMPLE_RATE", "1.0")),
             enabled=os.getenv("OTEL_TRACING_ENABLED", "true").lower() == "true",
@@ -76,12 +78,14 @@ def init_tracing(config: Optional[TracingConfig] = None) -> None:
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
         # Create resource with service info
-        resource = Resource.create({
-            "service.name": _config.service_name,
-            "service.version": os.getenv("APP_VERSION", "1.0.0"),
-            "deployment.environment": _config.environment,
-            **_config.extra_attributes,
-        })
+        resource = Resource.create(
+            {
+                "service.name": _config.service_name,
+                "service.version": os.getenv("APP_VERSION", "1.0.0"),
+                "deployment.environment": _config.environment,
+                **_config.extra_attributes,
+            }
+        )
 
         # Create sampler
         sampler = TraceIdRatioBased(_config.sample_rate)
@@ -100,8 +104,7 @@ def init_tracing(config: Optional[TracingConfig] = None) -> None:
 
         # Get tracer
         _tracer = trace.get_tracer(
-            _config.service_name,
-            schema_url="https://opentelemetry.io/schemas/1.11.0"
+            _config.service_name, schema_url="https://opentelemetry.io/schemas/1.11.0"
         )
 
         logger.info(
@@ -120,7 +123,7 @@ def init_tracing(config: Optional[TracingConfig] = None) -> None:
 
 def _add_exporter(config: TracingConfig) -> None:
     """Add the appropriate span exporter."""
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor  # noqa:F401
 
     if config.exporter_type == "otlp":
         try:
@@ -158,9 +161,7 @@ def _add_console_exporter() -> None:
     """Add console exporter for debugging."""
     from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
-    _tracer_provider.add_span_processor(
-        SimpleSpanProcessor(ConsoleSpanExporter())
-    )
+    _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
     logger.info("Added console exporter")
 
 
@@ -172,6 +173,7 @@ def get_tracer():
         # Return a no-op tracer if not initialized
         try:
             from opentelemetry import trace
+
             return trace.get_tracer("ml-observability-platform")
         except ImportError:
             return _NoOpTracer()
@@ -239,6 +241,7 @@ def trace_function(
         def process_data(df):
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -265,6 +268,7 @@ def trace_function(
                     raise
 
         return wrapper  # type: ignore
+
     return decorator
 
 
@@ -285,6 +289,7 @@ def trace_prediction(
         def predict(self, X):
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -321,6 +326,7 @@ def trace_prediction(
                     raise
 
         return wrapper  # type: ignore
+
     return decorator
 
 
