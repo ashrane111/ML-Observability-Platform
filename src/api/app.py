@@ -15,17 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-# NEW: Import metrics module
-from src.api.routes import explainability, health, metrics, monitoring, predictions
-from src.api.routes.explainability import set_dependencies
+from src.api.routes import health, monitoring, predictions
 from src.api.routes.health import set_model_status
-from src.api.routes.metrics import set_drift_status, set_model_loaded  # noqa:F401
 from src.api.routes.monitoring import set_drift_detector
 from src.api.routes.predictions import set_model
 from src.api.schemas import ErrorResponse
-
-# NEW: Import explainability modules
-from src.explainability import ExplanationType, SHAPExplainer
 from src.models.churn_predictor import ChurnPredictor
 from src.models.fraud_detector import FraudDetector
 
@@ -34,8 +28,17 @@ from src.models.price_predictor import PricePredictor
 from src.monitoring.drift_detector import DriftDetector
 
 # NEW: Import tracing modules
-from src.tracing import TracingConfig, init_tracing, shutdown_tracing
+from src.tracing import init_tracing, TracingConfig, shutdown_tracing
 from src.tracing.middleware import add_tracing_to_app
+
+# NEW: Import explainability modules
+from src.explainability import SHAPExplainer, ExplanationType
+from src.api.routes import explainability
+from src.api.routes.explainability import set_dependencies
+
+# NEW: Import metrics module
+from src.api.routes import metrics
+from src.api.routes.metrics import set_model_loaded, set_drift_status
 
 # Configuration
 MODEL_DIR = Path("models")
@@ -155,58 +158,82 @@ def setup_drift_detectors(reference_data: dict[str, pd.DataFrame]) -> dict[str, 
 
 # NEW: Setup SHAP explainers for loaded models
 def setup_explainers(
-    models: dict[str, Any], reference_data: dict[str, pd.DataFrame]
+    models: dict[str, Any],
+    reference_data: dict[str, pd.DataFrame]
 ) -> dict[str, SHAPExplainer]:
     """Setup SHAP explainers for each model."""
+    import numpy as np
+    from src.api.routes.predictions import (
+        prepare_fraud_features,
+        prepare_price_features,
+        prepare_churn_features,
+    )
+    
     explainers = {}
-
-    target_columns = {
-        "fraud": "is_fraud",
-        "price": "price",
-        "churn": "churned",
+    
+    # Map model types to their feature preparation functions
+    prepare_functions = {
+        "fraud": prepare_fraud_features,
+        "price": prepare_price_features,
+        "churn": prepare_churn_features,
     }
-
+    
     for model_type, model in models.items():
         try:
-            # Get background data (reference data without target)
+            # Get background data and encode it
             background = None
             if model_type in reference_data:
                 ref_df = reference_data[model_type].copy()
-                target_col = target_columns.get(model_type)
-                if target_col and target_col in ref_df.columns:
-                    ref_df = ref_df.drop(columns=[target_col])
-                background = ref_df.head(100)  # Use first 100 samples
-
+                
+                # Encode features using the same function as predictions
+                prepare_fn = prepare_functions.get(model_type)
+                if prepare_fn:
+                    encoded_rows = []
+                    for i in range(min(50, len(ref_df))):
+                        row = ref_df.iloc[[i]]
+                        try:
+                            encoded = prepare_fn(row)
+                            encoded_rows.append(encoded)
+                        except Exception:
+                            continue
+                    
+                    if encoded_rows:
+                        background = pd.concat(encoded_rows, ignore_index=True).astype(np.float64)
+                        logger.info(f"Prepared {len(background)} background samples for {model_type}")
+            
+            if background is None or len(background) == 0:
+                logger.warning(f"No background data for {model_type}, skipping explainer")
+                continue
+            
             # Get the underlying model for SHAP
-            underlying_model = model.model if hasattr(model, "model") else model
-
+            underlying_model = model.model if hasattr(model, 'model') else model
+            
             explainer = SHAPExplainer(
                 model=underlying_model,
                 background_data=background,
                 explanation_type=ExplanationType.TREE,
-                max_background_samples=100,
+                max_background_samples=50,
             )
             explainers[model_type] = explainer
             logger.info(f"SHAP explainer configured for {model_type}")
         except Exception as e:
             logger.warning(f"Failed to setup SHAP explainer for {model_type}: {e}")
-
+    
     return explainers
 
 
 # NEW: Simple explainer registry class for the API
 class ExplainerRegistry:
     """Simple registry to hold explainers."""
-
     def __init__(self):
         self._explainers = {}
-
+    
     def register(self, name: str, explainer: SHAPExplainer):
         self._explainers[name] = explainer
-
+    
     def get(self, name: str):
         return self._explainers.get(name)
-
+    
     def list_models(self):
         return list(self._explainers.keys())
 
@@ -262,7 +289,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down ML Observability Platform API...")
-
+    
     # NEW: Shutdown tracing
     try:
         shutdown_tracing()
@@ -339,18 +366,17 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     response = await call_next(request)
     duration = time.time() - start_time
     logger.debug(f"{request.method} {request.url.path} - {response.status_code}")
-
+    
     # Record metrics (skip /metrics endpoint to avoid recursion)
     if request.url.path != "/metrics":
         from src.api.routes.metrics import record_request
-
         record_request(
             method=request.method,
             endpoint=request.url.path,
             status_code=response.status_code,
-            duration=duration,
+            duration=duration
         )
-
+    
     return response
 
 

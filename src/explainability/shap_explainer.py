@@ -6,8 +6,7 @@ Supports XGBoost, LightGBM, and scikit-learn models.
 
 import logging
 from enum import Enum
-
-# from pathlib import Path
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -63,7 +62,6 @@ class SHAPExplainer:
         # Lazy import to avoid issues if shap not installed
         try:
             import shap
-
             self._shap = shap
         except ImportError as e:
             raise ImportError(
@@ -87,10 +85,12 @@ class SHAPExplainer:
 
         logger.info(
             f"Initialized SHAP explainer with type={explanation_type.value}, "
-            f"background_samples={len(self._background_data) if self._background_data is not None else 0}"  # n noqa:E501
+            f"background_samples={len(self._background_data) if self._background_data is not None else 0}"
         )
 
-    def _prepare_background_data(self, data: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    def _prepare_background_data(
+        self, data: Optional[pd.DataFrame]
+    ) -> Optional[pd.DataFrame]:
         """Prepare and sample background data."""
         if data is None:
             return None
@@ -98,7 +98,9 @@ class SHAPExplainer:
         # Sample if too large
         if len(data) > self.max_background_samples:
             data = data.sample(n=self.max_background_samples, random_state=42)
-            logger.info(f"Sampled background data to {self.max_background_samples} samples")
+            logger.info(
+                f"Sampled background data to {self.max_background_samples} samples"
+            )
 
         # Auto-detect feature names
         if self.feature_names is None and hasattr(data, "columns"):
@@ -113,10 +115,39 @@ class SHAPExplainer:
         if self.explanation_type == ExplanationType.TREE:
             # Tree explainer for XGBoost, LightGBM, RandomForest, etc.
             try:
+                # Try TreeExplainer first (fastest for tree models)
                 return shap.TreeExplainer(self.model)
             except Exception as e:
-                logger.warning(f"TreeExplainer failed: {e}. Falling back to Explainer.")
-                return shap.Explainer(self.model)
+                logger.warning(
+                    f"TreeExplainer failed: {e}. Trying KernelExplainer."
+                )
+                
+                # Use KernelExplainer with wrapper function (most compatible)
+                if self._background_data is not None:
+                    try:
+                        # Convert background data to float64 numpy array
+                        import numpy as np
+                        background = self._background_data.astype(np.float64)
+                        if len(background) > 50:
+                            background = background.sample(50, random_state=42)
+                        background_values = background.values
+                        
+                        # Create wrapper function to avoid attribute errors
+                        model = self.model
+                        if hasattr(model, "predict_proba"):
+                            def predict_fn(X):
+                                return model.predict_proba(X)
+                        else:
+                            def predict_fn(X):
+                                return model.predict(X)
+                        
+                        explainer = shap.KernelExplainer(predict_fn, background_values)
+                        logger.info("Created KernelExplainer successfully")
+                        return explainer
+                    except Exception as e2:
+                        raise RuntimeError(f"KernelExplainer failed: {e2}")
+                else:
+                    raise RuntimeError(f"TreeExplainer failed and no background data provided: {e}")
 
         elif self.explanation_type == ExplanationType.LINEAR:
             if self._background_data is None:
@@ -169,38 +200,65 @@ class SHAPExplainer:
             - feature_values: Input feature values
             - base_value: Expected value (model output with no features)
             - prediction: Model prediction for this input
+            - feature_contributions: Dict mapping feature names to SHAP values
         """
         X_array = self._ensure_numpy(X)
 
         # Get SHAP values
-        shap_values = self._explainer.shap_values(X_array)
+        shap_values = self._explainer.shap_values(X_array, nsamples=100)
 
-        # Handle multi-output models (e.g., classifiers with probabilities)
-        if isinstance(shap_values, list):
+        # Handle different output formats
+        if isinstance(shap_values, np.ndarray):
+            # KernelExplainer returns shape (n_samples, n_features, n_classes)
+            if shap_values.ndim == 3:
+                # For binary classification, use positive class (last index)
+                shap_values = shap_values[:, :, -1]
+        elif isinstance(shap_values, list):
             # For binary classification, use positive class (index 1)
-            shap_values = shap_values[1] if len(shap_values) == 2 else shap_values
+            shap_values = shap_values[1] if len(shap_values) == 2 else shap_values[0]
+            if isinstance(shap_values, np.ndarray):
+                shap_values = shap_values
+
+        # Ensure 2D
+        if shap_values.ndim == 1:
+            shap_values = shap_values.reshape(1, -1)
 
         # Get base value (expected value)
         base_value = self._explainer.expected_value
         if isinstance(base_value, (list, np.ndarray)):
-            base_value = base_value[1] if len(base_value) == 2 else base_value[0]
+            base_value = base_value[-1] if len(base_value) >= 2 else base_value[0]
 
         # Get model prediction
         if hasattr(self.model, "predict_proba"):
             prediction = self.model.predict_proba(X_array)
             if prediction.ndim > 1:
-                prediction = prediction[:, 1]  # Positive class probability
+                prediction = prediction[:, -1]  # Positive class probability
         else:
             prediction = self.model.predict(X_array)
 
+        # Get feature names
+        feature_names = self.feature_names or [f"feature_{i}" for i in range(X_array.shape[1])]
+        
+        # Create feature contributions dict (sorted by absolute value)
+        contributions = {}
+        for i, name in enumerate(feature_names):
+            contributions[name] = float(shap_values[0, i])
+        
+        # Sort by absolute value
+        sorted_contributions = dict(
+            sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
+        )
+
         result = {
-            "shap_values": (
-                shap_values.tolist() if isinstance(shap_values, np.ndarray) else shap_values
-            ),
-            "feature_names": self.feature_names
-            or [f"feature_{i}" for i in range(X_array.shape[1])],
+            "shap_values": shap_values.tolist()
+            if isinstance(shap_values, np.ndarray)
+            else shap_values,
+            "feature_names": feature_names,
             "feature_values": X_array.tolist(),
-            "prediction": prediction.tolist() if isinstance(prediction, np.ndarray) else prediction,
+            "feature_contributions": sorted_contributions,
+            "prediction": prediction.tolist()
+            if isinstance(prediction, np.ndarray)
+            else prediction,
         }
 
         if include_base_value:
@@ -228,7 +286,9 @@ class SHAPExplainer:
         """
         if X is None:
             if self._background_data is None:
-                raise ValueError("Either provide X or initialize with background_data")
+                raise ValueError(
+                    "Either provide X or initialize with background_data"
+                )
             X = self._background_data
 
         X_array = self._ensure_numpy(X)
@@ -251,7 +311,9 @@ class SHAPExplainer:
             raise ValueError(f"Unknown method: {method}. Use mean_abs, mean, or max_abs")
 
         # Create feature importance dictionary
-        feature_names = self.feature_names or [f"feature_{i}" for i in range(len(importance))]
+        feature_names = self.feature_names or [
+            f"feature_{i}" for i in range(len(importance))
+        ]
 
         importance_dict = dict(zip(feature_names, importance.tolist()))
 
@@ -339,9 +401,7 @@ class SHAPExplainer:
         X_array = self._ensure_numpy(X)
 
         if sample_idx >= len(X_array):
-            raise ValueError(
-                f"sample_idx {sample_idx} out of range for data of size {len(X_array)}"
-            )
+            raise ValueError(f"sample_idx {sample_idx} out of range for data of size {len(X_array)}")
 
         # Get single sample
         X_single = X_array[[sample_idx]]
@@ -359,11 +419,7 @@ class SHAPExplainer:
 
         # Build report
         report = {
-            "prediction": (
-                explanation["prediction"][0]
-                if isinstance(explanation["prediction"], list)
-                else explanation["prediction"]
-            ),
+            "prediction": explanation["prediction"][0] if isinstance(explanation["prediction"], list) else explanation["prediction"],
             "base_value": explanation.get("base_value"),
             "total_shap_contribution": float(np.sum(shap_values)),
             "feature_details": [
