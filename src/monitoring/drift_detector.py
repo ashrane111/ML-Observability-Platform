@@ -13,34 +13,30 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
+import json
 
 import numpy as np
 import pandas as pd
 from loguru import logger
 
-# Handle Evidently 0.7.x API
-try:
-    from evidently import ColumnMapping, Report
-    from evidently.presets import DataDriftPreset
+# Handle Evidently 0.7.x API (new API)
+EVIDENTLY_AVAILABLE = False
+Report = None
+DataDriftPreset = None
 
+try:
+    from evidently import Report
+    from evidently.presets import DataDriftPreset
     EVIDENTLY_AVAILABLE = True
+    logger.info("Evidently 0.7.x loaded successfully")
 except ImportError:
     try:
-        # Fallback for older API
-        from evidently.metric_preset import DataDriftPreset
+        # Fallback for older API (0.4.x - 0.6.x)
         from evidently.report import Report
-
-        try:
-            from evidently import ColumnMapping
-        except ImportError:
-            from evidently.pipeline.column_mapping import ColumnMapping
-
+        from evidently.metric_preset import DataDriftPreset
         EVIDENTLY_AVAILABLE = True
+        logger.info("Evidently (older API) loaded successfully")
     except ImportError:
-        EVIDENTLY_AVAILABLE = False
-        ColumnMapping = None  # type: ignore[misc, assignment]
-        Report = None  # type: ignore[misc, assignment]
-        DataDriftPreset = None  # type: ignore[misc, assignment]
         logger.warning("Evidently not available, using fallback drift detection")
 
 
@@ -159,7 +155,8 @@ class DriftDetector:
 
         logger.info(
             f"DriftDetector initialized: "
-            f"PSI warning={psi_threshold_warning}, critical={psi_threshold_critical}"
+            f"PSI warning={psi_threshold_warning}, critical={psi_threshold_critical}, "
+            f"Evidently available={EVIDENTLY_AVAILABLE}"
         )
 
     def set_reference_data(
@@ -225,8 +222,15 @@ class DriftDetector:
 
         logger.info(f"Detecting drift for {dataset_name}: {len(current_data)} samples")
 
-        # Use statistical comparison for drift detection
-        drift_results = self._compute_drift_statistics(current_data)
+        # Try Evidently first, fall back to statistical comparison
+        if EVIDENTLY_AVAILABLE:
+            try:
+                drift_results = self._compute_drift_with_evidently(current_data)
+            except Exception as e:
+                logger.warning(f"Evidently drift detection failed: {e}, using fallback")
+                drift_results = self._compute_drift_statistics(current_data)
+        else:
+            drift_results = self._compute_drift_statistics(current_data)
 
         # Determine drift status
         drift_status = self._determine_drift_status(
@@ -246,7 +250,7 @@ class DriftDetector:
             drifted_features=drift_results["drifted_features"],
             psi_threshold=self.psi_threshold_warning,
             drift_threshold=self.drift_share_threshold,
-            report_json=None,
+            report_json=drift_results.get("report_json"),
         )
 
         logger.info(
@@ -256,8 +260,73 @@ class DriftDetector:
 
         return result
 
+    def _compute_drift_with_evidently(self, current_data: pd.DataFrame) -> dict:
+        """Compute drift using Evidently AI (0.7.x API)."""
+        # Create report
+        report = Report(metrics=[DataDriftPreset()])
+        
+        # Run with new API: run(current, reference)
+        result = report.run(current_data, self._reference_data)
+        
+        # Parse results from JSON
+        json_str = result.json()
+        data = json.loads(json_str)
+        
+        # Extract drift information from metrics
+        feature_scores = {}
+        drifted_features = []
+        drift_detected = False
+        drift_share = 0.0
+        n_drifted = 0
+        n_features = 0
+        
+        for metric in data.get("metrics", []):
+            metric_name = metric.get("metric_name", "")
+            value = metric.get("value")
+            config = metric.get("config", {})
+            
+            # DriftedColumnsCount gives overall drift info
+            if "DriftedColumnsCount" in metric_name:
+                if isinstance(value, dict):
+                    n_drifted = int(value.get("count", 0))
+                    drift_share = float(value.get("share", 0.0))
+                drift_detected = n_drifted > 0
+            
+            # ValueDrift gives per-column drift scores (p-values in 0.7.x)
+            elif "ValueDrift" in metric_name:
+                column = config.get("column", "unknown")
+                threshold = config.get("threshold", 0.05)
+                
+                # In 0.7.x, value is the p-value directly (float)
+                if isinstance(value, (int, float)):
+                    p_value = float(value)
+                    # Drift detected if p-value < threshold
+                    is_drifted = p_value < threshold
+                    
+                    if column != "unknown":
+                        # Store p-value (lower = more drift)
+                        feature_scores[column] = p_value
+                        if is_drifted:
+                            drifted_features.append(column)
+        
+        n_features = len(feature_scores) if feature_scores else len(current_data.columns)
+        
+        # Recalculate drift share based on drifted features
+        if n_features > 0:
+            drift_share = len(drifted_features) / n_features
+        
+        return {
+            "drift_detected": len(drifted_features) > 0,
+            "drift_share": drift_share,
+            "n_drifted": len(drifted_features),
+            "n_features": n_features,
+            "feature_scores": feature_scores,
+            "drifted_features": drifted_features,
+            "report_json": data,
+        }
+
     def _compute_drift_statistics(self, current_data: pd.DataFrame) -> dict:
-        """Compute drift statistics using statistical tests."""
+        """Compute drift statistics using statistical tests (fallback)."""
         feature_scores = {}
         drifted_features = []
 
@@ -334,13 +403,21 @@ class DriftDetector:
 
             # Align indices
             all_bins = ref_props.index.union(cur_props.index)
-            ref_props = ref_props.reindex(all_bins, fill_value=0.0001)
-            cur_props = cur_props.reindex(all_bins, fill_value=0.0001)
+            
+            # Use small epsilon to avoid division by zero
+            epsilon = 0.0001
+            ref_props = ref_props.reindex(all_bins, fill_value=epsilon)
+            cur_props = cur_props.reindex(all_bins, fill_value=epsilon)
+            
+            # Ensure no zeros
+            ref_props = ref_props.clip(lower=epsilon)
+            cur_props = cur_props.clip(lower=epsilon)
 
             # Calculate PSI
             psi = np.sum((cur_props - ref_props) * np.log(cur_props / ref_props))
 
-            return max(0, float(psi))  # PSI should be non-negative
+            # Cap at reasonable maximum to avoid inf
+            return min(max(0, float(psi)), 10.0)
 
         except Exception as e:
             logger.debug(f"PSI calculation error: {e}")
@@ -500,24 +577,13 @@ class DriftDetector:
 
         if EVIDENTLY_AVAILABLE:
             try:
-                # Create column mapping
-                column_mapping = ColumnMapping(
-                    target=self._target_column,
-                    prediction=self._prediction_column,
-                    numerical_features=self._numerical_features,
-                    categorical_features=self._categorical_features,
-                )
-
                 # Create report with DataDriftPreset
-                report = Report([DataDriftPreset()])
+                report = Report(metrics=[DataDriftPreset()])
 
-                report.run(
-                    reference_data=self._reference_data,
-                    current_data=current_data,
-                    column_mapping=column_mapping,
-                )
+                # Run with new API: run(current, reference)
+                result = report.run(current_data, self._reference_data)
 
-                report.save_html(output_path)
+                result.save_html(output_path)
                 logger.info(f"Drift report saved to {output_path}")
 
             except Exception as e:
@@ -546,8 +612,7 @@ class DriftDetector:
         <ul>
             <li>Status: {drift_result.drift_status.value}</li>
             <li>Drift Share: {drift_result.drift_share:.2%}</li>
-            <li>Drifted Features: {drift_result.number_of_drifted_features}/ \
-                {drift_result.total_features}</li>
+            <li>Drifted Features: {drift_result.number_of_drifted_features}/{drift_result.total_features}</li>
         </ul>
         <h2>Feature Drift Scores</h2>
         <table border="1">

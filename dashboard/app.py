@@ -116,6 +116,19 @@ def make_prediction(model_name: str, features: Dict[str, Any]) -> Dict[str, Any]
         return {"error": str(e)}
 
 
+def get_explanation(model_name: str, features: Dict[str, Any], top_k: int = 10) -> Dict[str, Any]:
+    """Get SHAP explanation for a prediction."""
+    try:
+        response = requests.post(
+            f"{API_URL}/explain/prediction",
+            json={"model_name": model_name, "features": features, "top_k": top_k},
+            timeout=30
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ============================================================================
 # Sidebar
 # ============================================================================
@@ -363,8 +376,8 @@ def render_alerts_page():
                     alert.get("severity"), "⚪"
                 )
                 with st.expander(
-                    f"{icon} {alert.get('alert_type', 'Unknown')} - \
-                    {str(alert.get('created_at', ''))[:19]}"
+                    f"{icon} {alert.get('alert_type', 'Unknown')} - "
+                    f"{str(alert.get('created_at', ''))[:19]}"
                 ):
                     st.write(f"**Message:** {alert.get('message', 'No message')}")
                     st.write(f"**Severity:** {alert.get('severity', 'unknown')}")
@@ -391,7 +404,6 @@ def render_predictions_page(selected_model: str):
         with col1:
             amount = st.number_input("Amount ($)", value=100.0)
             hour = st.slider("Hour", 0, 23, 14)
-            customer_age = st.number_input("Customer Age", value=35)
             transaction_type = st.selectbox(
                 "Transaction Type", ["purchase", "transfer", "payment", "withdrawal", "deposit"]
             )
@@ -444,6 +456,72 @@ def render_predictions_page(selected_model: str):
                 with col2:
                     prob = result.get("fraud_probability", 0)
                     st.metric("Fraud Probability", f"{prob:.1%}")
+
+                # SHAP Explanation Section
+                st.markdown("---")
+                st.subheader("🔬 Why this prediction? (SHAP Explanation)")
+
+                with st.spinner("Generating explanation..."):
+                    explanation = get_explanation("fraud", features, top_k=10)
+
+                if "error" not in explanation and "detail" not in explanation:
+                    exp_col1, exp_col2 = st.columns(2)
+
+                    with exp_col1:
+                        st.markdown("**⬆️ Factors Increasing Fraud Risk:**")
+                        top_positive = explanation.get("top_positive", [])
+                        if top_positive:
+                            for item in top_positive[:5]:
+                                feat = item.get("feature", "")
+                                contrib = item.get("contribution", 0)
+                                st.write(f"• **{feat}**: +{contrib:.4f}")
+                        else:
+                            st.write("None")
+
+                    with exp_col2:
+                        st.markdown("**⬇️ Factors Decreasing Fraud Risk:**")
+                        top_negative = explanation.get("top_negative", [])
+                        if top_negative:
+                            for item in top_negative[:5]:
+                                feat = item.get("feature", "")
+                                contrib = item.get("contribution", 0)
+                                st.write(f"• **{feat}**: {contrib:.4f}")
+                        else:
+                            st.write("None")
+
+                    # Visualization
+                    st.markdown("---")
+                    st.subheader("📊 Feature Contributions")
+
+                    shap_values = explanation.get("shap_values", {})
+                    non_zero = {k: v for k, v in shap_values.items() if abs(v) > 0.0001}
+                    sorted_features = sorted(non_zero.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
+
+                    if sorted_features:
+                        chart_data = pd.DataFrame({
+                            "Feature": [f[0] for f in sorted_features],
+                            "SHAP Value": [f[1] for f in sorted_features]
+                        })
+
+                        fig = px.bar(
+                            chart_data,
+                            x="SHAP Value",
+                            y="Feature",
+                            orientation="h",
+                            color="SHAP Value",
+                            color_continuous_scale=["green", "lightgray", "red"],
+                            color_continuous_midpoint=0
+                        )
+                        fig.update_layout(
+                            height=400,
+                            yaxis=dict(autorange="reversed"),
+                            coloraxis_showscale=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        st.caption("Red = increases fraud risk, Green = decreases fraud risk")
+                else:
+                    st.warning(f"Could not generate explanation: {explanation.get('error', explanation.get('detail', 'Unknown error'))}")
             else:
                 st.error(f"Error: {result.get('error', result.get('detail', 'Unknown error'))}")
 
